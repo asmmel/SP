@@ -1,0 +1,28 @@
+spotify_app Рабочая версия
+spotify_app Версия 3
+spotify_app Версия 2
+Scripts
+resources
+Lib
+Include
+dist
+data
+build_tools
+build
+android
+src
+СУБТИТРЫ.txt
+app_settings.json
+cache_except.json
+cache.json
+cl.bat
+double.py
+gu.py
+Music Automation.spec
+pyvenv.cfg
+settings.json
+songs.txt
+Spotify Full.py
+VpnSpotifyAutomation.py
+*.pyc
+__pycache__
