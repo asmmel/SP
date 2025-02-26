@@ -36,13 +36,15 @@ class DeviceState:
         """Загрузка истории проигрываний для конкретного устройства"""
         try:
             os.makedirs('data', exist_ok=True)
-            cache_file = 'data/apple_track_plays.json'
+            cache_file = f'data/{self.config.service_type}_track_plays.json'
             if os.path.exists(cache_file):
-                with open(cache_file, 'r') as f:
+                with open(cache_file, 'r', encoding='utf-8') as f:
                     all_devices_data = json.load(f)
                     self.track_plays = all_devices_data.get(self.device_id, {})
+                    logger.debug(f"Loaded track plays for {self.device_id}: {len(self.track_plays)} tracks")
             else:
                 self.track_plays = {}
+                logger.info(f"No track plays file found for {self.device_id}, starting fresh")
         except Exception as e:
             logger.error(f"Error loading track plays for device {self.device_id}: {str(e)}")
             self.track_plays = {}
@@ -208,16 +210,13 @@ class AppleMusicAutomation:
 
     def get_name(self, device: str) -> Optional[List[str]]:
         state = self.get_device_state(device)
-        
         with state.lock:
-            # Проверяем есть ли еще треки, которые можно проиграть
             total_available = 0
             prefix = "apple" if self.config.service_type == "apple_music" else self.config.service_type
             for i in range(1, 1000):
                 file_path = f"data/database_part_{prefix}_{i}.txt"
                 if not os.path.exists(file_path):
                     break
-                
                 with open(file_path) as f:
                     for line in f:
                         track = line.strip()
@@ -226,14 +225,9 @@ class AppleMusicAutomation:
             
             if total_available == 0:
                 logger.info(f"Device {device} has no more tracks available due to play limits")
-                self.bot.send_message(
-                    self.config.chat_id, 
-                    f"Device {device} has completed playing all available tracks (reached max plays limit)"
-                )
                 return None
-                
-            # Стандартный поиск подходящего трека
-            prefix = "apple" if self.config.service_type == "apple_music" else self.config.service_type
+            
+            # Поиск трека
             while True:
                 file_path = f"data/database_part_{prefix}_{state.current_file}.txt"
                 if not os.path.exists(file_path):
@@ -248,9 +242,7 @@ class AppleMusicAutomation:
                     available_songs = []
                     for line in f:
                         track = line.strip()
-                        if (track and 
-                            track not in state.played_songs and 
-                            state.can_play_track(track)):
+                        if track and track not in state.played_songs and state.can_play_track(track):
                             available_songs.append(track)
                 
                 if not available_songs:
@@ -262,7 +254,7 @@ class AppleMusicAutomation:
                 state.track_plays[song] = state.track_plays.get(song, 0) + 1
                 state._save_track_plays()
                 return [song]
-
+            
     async def search_and_play(self, d, name_artist: str):
         """Поиск и воспроизведение трека"""
         if not name_artist.strip():
@@ -386,75 +378,53 @@ class AppleMusicAutomation:
         proxy_check_interval = 3600  # 1 час
         
         while state.songs_played < state.total_songs and self.running:
-            # Проверяем прокси каждый час
+            # Проверка прокси
             current_time = time.time()
             if current_time - last_proxy_check >= proxy_check_interval:
                 try:
                     d = u2.connect(device)
                     proxy_status = await self.check_proxy(d, device)
-                    
                     if not proxy_status:
                         logger.warning(f"Proxy check failed on {device}, attempting full restart")
                         if not await self.restart_proxy_full(d, device):
                             logger.error(f"Failed to restore proxy functionality on {device}")
-                            # Можно добавить дополнительную логику обработки ошибки
-                            
                     last_proxy_check = current_time
-                    
                 except Exception as e:
                     logger.error(f"Error during proxy check: {str(e)}")
-                # Проверяем, остались ли доступные треки для этого устройства
-            available_tracks = False
-            for i in range(1, 1000):  # Проверяем все возможные файлы
-                file_path = f"data/database_part_apple_{i}.txt"
-                if not os.path.exists(file_path):
-                    break
-                    
-                with open(file_path) as f:
-                    for line in f:
-                        track = line.strip()
-                        if track and track not in state.played_songs and state.can_play_track(track):
-                            available_tracks = True
-                            break
-                if available_tracks:
-                    break
             
-            if not available_tracks:
-                logger.info(f"No more available tracks for device {device}")
-                break
-                
+            # Получение трека
             retries = self.config.retry_attempts
             while retries > 0 and self.running:
                 try:
                     d = u2.connect(device)
                     result = self.get_name(device)
-                    
-                    if not result or not self.running:
-                        return
+                    if not result:
+                        logger.info(f"No more available tracks for device {device}")
+                        return  # Завершаем устройство, если нет треков
                     
                     name_artist = result[0]
                     logger.info(f"Device {device}: Playing song {name_artist}")
                     await self.search_and_play(d, name_artist)
                     state.songs_played += 1
                     
-                    if hasattr(self, 'on_device_progress') and self.on_device_progress:
+                    if self.on_device_progress:
                         self.on_device_progress(device, state.songs_played, state.total_songs)
                     
                     if state.songs_played % 10 == 0:
                         self._periodic_cache_save()
-                        
-                    logger.info(f"Device {device} progress: {state.songs_played}/{state.total_songs}")
-                    break
                     
+                    logger.info(f"Device {device} progress: {state.songs_played}/{state.total_songs}")
+                    break  # Успешно проиграли, выходим из retries
+                
                 except Exception as e:
-                    logger.error(f"Error on device {device}, attempt {4-retries}: {str(e)}")
+                    logger.error(f"Error on device {device}, attempt {self.config.retry_attempts - retries + 1}: {str(e)}")
                     retries -= 1
                     if retries == 0:
                         self._handle_error("MaxRetriesExceeded", e, device, True)
                     await asyncio.sleep(5)
-                    
-                if not self.running:
-                    return
+            
+            if not self.running:
+                return
             
             await asyncio.sleep(2)
 
@@ -666,8 +636,10 @@ class AppleMusicAutomation:
         current_app = d.app_current()
         return current_app["package"] == "com.apple.android.music" if current_app else False
 
-    async def play_circles(self, circles: int):
-        """Выполнение циклов воспроизведения"""
+    # Исправленная версия функции play_circles:
+
+    async def play_circles(self):
+        """Выполнение циклов воспроизведения до исчерпания лимитов"""
         self.running = True
         logger.info(f'Starting playback process')
         self.split_database(self.config.database_path)
@@ -675,181 +647,114 @@ class AppleMusicAutomation:
         timestamp_start = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         logger.info(f"Start {self.config.service_type.capitalize()}: [{timestamp_start}]")
         
-        # Проверяем доступные треки для каждого устройства
-        total_available_tracks = 0
-        prefix = "spotify" if self.config.service_type == "spotify" else "apple"
-        
-        # Проверяем каждое устройство
-        for device in self.devicelist:
-            state = self.get_device_state(device)
-            device_available = 0
-            
-            # Проходим по всем файлам базы
-            for i in range(1, 1000):
-                file_path = f"data/database_part_{prefix}_{i}.txt"
-                if not os.path.exists(file_path):
-                    break
-                
-                with open(file_path) as f:
-                    for line in f:
-                        track = line.strip()
-                        if track and state.can_play_track(track):
-                            device_available += 1
-                            
-            logger.info(f"Device {device} has {device_available} available tracks")
-            total_available_tracks += device_available
-        
-        if total_available_tracks == 0:
-            logger.info("All tracks have reached maximum plays limit, automation complete")
-            await self._send_completion_report()
-            self.running = False
-            return
-        
-        logger.info(f"Found {total_available_tracks} total plays available across all devices")
-        
-        # Запускаем процессы для каждого устройства
-        tasks = [self.process_device(device) for device in self.devicelist]
-        try:
-            await asyncio.gather(*tasks)
-        except asyncio.CancelledError:
-            logger.info("Tasks cancelled")
-        
-        # Проверяем результаты только если не было принудительной остановки
-        if self.running:
-            all_completed = True
-            devices_status = []
-            
+        cycle_count = 0
+        while self.running:
+            cycle_count += 1
+            logger.info(f"Starting cycle {cycle_count}")
+
+            # Проверка доступных треков
+            available_tracks = False
+            prefix = "apple" if self.config.service_type == "apple_music" else self.config.service_type
             for device in self.devicelist:
                 state = self.get_device_state(device)
-                available_for_device = 0
-                
-                # Проверяем доступные треки для устройства
                 for i in range(1, 1000):
                     file_path = f"data/database_part_{prefix}_{i}.txt"
                     if not os.path.exists(file_path):
                         break
-                    
                     with open(file_path) as f:
                         for line in f:
                             track = line.strip()
-                            if track and state.can_play_track(track):
-                                available_for_device += 1
-                
-                status = {
-                    'device': device,
-                    'played': state.songs_played,
-                    'total': state.total_songs,
-                    'available': available_for_device
-                }
-                devices_status.append(status)
-                
-                if available_for_device > 0 and state.songs_played < state.total_songs:
-                    all_completed = False
-                    logger.warning(f"Device {device} incomplete: {state.songs_played}/{state.total_songs} "
-                                f"(still has {available_for_device} available tracks)")
+                            if track and state.can_play_track(track):  # Только лимит прослушиваний
+                                available_tracks = True
+                                logger.debug(f"Found available track for {device}: {track}")
+                                break
+                    if available_tracks:
+                        break
             
-            # Логируем полный статус
-            logger.info("Playback cycle completed. Devices status:")
-            for status in devices_status:
-                logger.info(f"Device {status['device']}: "
-                        f"Played {status['played']}/{status['total']}, "
-                        f"Available tracks: {status['available']}")
+            if not available_tracks:
+                logger.info("All tracks have reached their maximum play limits")
+                await self._send_completion_report()
+                self.running = False
+                break
             
-            if all_completed:
-                logger.info("All devices have completed playing available songs")
+            # Запускаем процессы для устройств
+            tasks = [self.process_device(device) for device in self.devicelist]
+            try:
+                await asyncio.gather(*tasks)
+            except asyncio.CancelledError:
+                logger.info("Tasks cancelled")
+                break
+            
+            if self.running:
                 await self.finish_play()
-            else:
-                logger.warning("Not all devices completed their playback")
-
 
     async def finish_play(self):
         """Завершение цикла воспроизведения и подготовка к следующему"""
         try:
             logger.info('Finishing playback')
             self._save_cache()
+            await self._send_completion_report()
             
-            # Проверяем остались ли треки для проигрывания
-            prefix = "spotify" if self.config.service_type == "spotify" else "apple"
+            # Проверяем остались ли треки
+            prefix = "apple" if self.config.service_type == "apple_music" else self.config.service_type
             any_tracks_available = False
-            
-            # Проверяем все устройства
             for device in self.devicelist:
                 state = self.get_device_state(device)
                 device_available = 0
-                
-                # Проверяем все файлы
                 for i in range(1, 1000):
                     file_path = f"data/database_part_{prefix}_{i}.txt"
                     if not os.path.exists(file_path):
                         break
-                        
                     with open(file_path) as f:
                         for line in f:
                             track = line.strip()
                             if track and state.can_play_track(track):
                                 device_available += 1
-                
                 logger.info(f"Device {device} has {device_available} tracks available for next cycle")
                 if device_available > 0:
                     any_tracks_available = True
                     break
-                    
+            
             if not any_tracks_available:
-                logger.info("No more tracks available for any device, sending completion report")
+                logger.info("No more tracks available for any device")
                 await self._send_completion_report()
                 self.running = False
                 return
-                
-            # Если есть доступные треки, очищаем состояние и запускаем новый цикл
+            
+            # Если есть треки, сбрасываем состояние для нового цикла
             logger.info("Tracks still available, preparing for next cycle")
             await self._reset_state_for_new_cycle()
             
-            # Ждем перед следующим циклом
             delay = self.config.delay_between_circles
             logger.info(f"Sleeping for {delay} seconds before next cycle")
             await asyncio.sleep(delay)
             
-            # Запускаем новый цикл если не было остановки
-            if self.running:
-                logger.info("Starting new playback cycle")
-                await self.play_circles(1)
-                
         except Exception as e:
             logger.error(f"Error in finish_play: {str(e)}")
-            # Добавляем подробности об ошибке
             logger.exception("Full error details:")
 
     async def _reset_state_for_new_cycle(self):
         """Сброс состояния для нового цикла"""
         try:
             logger.info("Resetting state for new cycle")
-            # Очищаем состояние устройств
             for device in self.devicelist:
                 state = self.get_device_state(device)
-                # Сохраняем текущие play counts
                 play_counts = state.track_plays.copy()
-                
-                # Полностью очищаем состояние
                 state.played_songs.clear()
                 state.current_file = 1
                 state.songs_played = 0
-                
-                # Восстанавливаем play counts, так как они нужны для отслеживания лимитов
                 state.track_plays = play_counts
-                
                 logger.debug(f"Reset state for device {device}: "
-                            f"file={state.current_file}, "
-                            f"played={state.songs_played}, "
+                            f"file={state.current_file}, played={state.songs_played}, "
                             f"tracks with plays={len(state.track_plays)}")
             
             # Очищаем кэш-файл
             os.makedirs('data', exist_ok=True)
             cache_file = f"data/{self.config.service_type}_cache.json"
-            with open(cache_file, 'w') as f:
+            logger.debug(f"Clearing cache file: {cache_file}")
+            with open(cache_file, 'w', encoding='utf-8') as f:
                 json.dump({}, f)
-            
-            # Перезагружаем состояние
-            self._load_cache()
+            logger.debug(f"Cache file {cache_file} cleared successfully")
             
             logger.info('State successfully reset for new cycle')
             return True
@@ -959,48 +864,71 @@ class AppleMusicAutomation:
         try:
             stats_file = f"data/{self.config.service_type}_track_plays.json"
             if not os.path.exists(stats_file):
+                logger.info("No play statistics file found, limits not reached")
                 return False
-                
+                    
             with open(stats_file, 'r') as f:
                 all_devices_data = json.load(f)
-                
+                    
             if not all_devices_data:
+                logger.info("Empty play statistics, limits not reached")
                 return False
 
-            total_tracks = 0
-            max_plays_reached = 0
+            # Получаем общее количество треков в базе
+            total_tracks_in_db = 0
+            prefix = "spotify" if self.config.service_type == "spotify" else "apple"
+            for i in range(1, 1000):
+                file_path = f"data/database_part_{prefix}_{i}.txt"
+                if not os.path.exists(file_path):
+                    break
+                
+                with open(file_path) as f:
+                    total_tracks_in_db += sum(1 for line in f if line.strip())
+            
+            logger.info(f"Total tracks in database: {total_tracks_in_db}")
+            
+            # Проверяем количество треков, достигших лимита
+            tracks_at_limit = 0
+            tracks_processed = set()
             
             for device_id, device_data in all_devices_data.items():
                 if not isinstance(device_data, dict):
                     continue
                     
                 for track, plays in device_data.items():
-                    total_tracks += 1
-                    if plays >= self.config.max_plays_per_track:
-                        max_plays_reached += 1
-                        
-            if total_tracks > 0 and max_plays_reached == total_tracks:
-                logger.info(f"All tracks ({total_tracks}) have reached maximum plays limit ({self.config.max_plays_per_track})")
-                message = (
-                    f"🎵 Достигнут лимит прослушиваний!\n\n"
-                    f"Все треки ({total_tracks}) были проиграны максимальное количество раз "
-                    f"({self.config.max_plays_per_track}).\n"
-                    f"Автоматизация завершена."
-                )
-                self.bot.send_message(self.config.chat_id, message)
-                
-                with open(stats_file, 'rb') as stats:
-                    self.bot.send_document(
-                        self.config.chat_id, 
-                        stats,
-                        caption="📊 Финальная статистика прослушиваний"
+                    if track not in tracks_processed:
+                        tracks_processed.add(track)
+                        if plays >= self.config.max_plays_per_track:
+                            tracks_at_limit += 1
+            
+            logger.info(f"Tracks at limit: {tracks_at_limit}/{len(tracks_processed)}")
+            
+            # Если все обработанные треки достигли лимита и их количество совпадает с общим количеством
+            if len(tracks_processed) > 0 and tracks_at_limit == len(tracks_processed) and len(tracks_processed) >= total_tracks_in_db:
+                logger.info(f"All tracks ({tracks_at_limit}) have reached maximum plays limit ({self.config.max_plays_per_track})")
+                # Отправляем уведомление только если это не было сделано ранее
+                if self.running:
+                    message = (
+                        f"🎵 Достигнут лимит прослушиваний!\n\n"
+                        f"Все треки ({tracks_at_limit}) были проиграны максимальное количество раз "
+                        f"({self.config.max_plays_per_track}).\n"
+                        f"Автоматизация завершена."
                     )
+                    self.bot.send_message(self.config.chat_id, message)
+                    
+                    with open(stats_file, 'rb') as stats:
+                        self.bot.send_document(
+                            self.config.chat_id, 
+                            stats,
+                            caption="📊 Финальная статистика прослушиваний"
+                        )
                 return True
-                
+                    
             return False
-                
+                    
         except Exception as e:
             logger.error(f"Error checking play limits: {str(e)}")
+            logger.exception("Full exception details:")
             return False
         
     def _handle_app_not_responding(self, d):
@@ -1030,38 +958,37 @@ class AppleMusicAutomation:
             return False
 
     async def main(self):
-        
         try:
             logger.info(f"Config max_plays_per_track: {self.config.max_plays_per_track}")
             if not os.path.exists(self.config.database_path):
                 logger.error("Database file not found!")
-                return
-                
-            # Проверяем достижение лимитов
+                return False
+            
             if self.check_play_limits_reached():
-                logger.info("Maximum plays reached for all tracks")
+                logger.info("Maximum plays reached for all tracks, stopping automation")
                 await self._send_completion_report()
                 self.running = False
-                return
-
+                return True
+            
             self.initialize_devices()
             if not self.devicelist:
                 logger.error("No devices found!")
-                return
-
-            total_songs = sum(1 for line in open(self.config.database_path) if line.strip())
+                return False
             
+            total_songs = sum(1 for line in open(self.config.database_path) if line.strip())
             for device in self.devicelist:
                 state = self.get_device_state(device)
                 state.total_songs = total_songs
-
+            
             logger.info(f"Starting automation with {len(self.devicelist)} devices and {total_songs} songs")
+            await self.play_circles()  # Циклы до исчерпания лимитов
             
-            await self.play_circles(1)
-            
+            return True
         except Exception as e:
             logger.error(f"Error in main: {str(e)}")
+            logger.exception("Full error details:")
             self._save_cache(is_except=True)
+            return False
 
 def run():
     """Точка входа"""

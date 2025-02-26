@@ -177,27 +177,19 @@ class AppleMusicWorker(QThread):
             return False
 
     async def _run_automation(self, automation):
-        """Запуск автоматизации с возможностью остановки"""
         try:
-            while self.running:
-                try:
-                    await automation.main()
-                    if not self.running or automation.check_play_limits_reached():
-                        logger.info("Automation complete or stop signal received")
-                        break
-                    logger.info("Automation cycle completed, waiting before next cycle")
-                    await asyncio.sleep(60)
-                    
-                except Exception as e:
-                    logger.error(f"Error in automation cycle: {str(e)}")
-                    if not self.running:
-                        break
-                    logger.info("Waiting before retry...")
-                    await asyncio.sleep(5)
-                    
+            # Запускаем автоматизацию только один раз
+            await automation.main()
+            
+            # Если main() вернул управление, завершаем работу
+            logger.info("Automation cycle completed")
+            self.task_completed.emit(True)
+            return
+            
         except Exception as e:
             logger.error(f"Error in automation run: {str(e)}")
-            raise   
+            self.task_completed.emit(False)
+            raise 
 
     def _handle_device_progress(self, device: str, current: int, total: int):
         progress = f"{current}/{total} ({(current/total*100):.1f}%)"
