@@ -67,6 +67,72 @@ class SettingsDialog(QDialog):
         bluestacks_layout.addRow("Шаг портов:", self.port_step)
         layout.addWidget(bluestacks_group)
 
+        device_detection_group = QGroupBox("Обнаружение устройств")
+        device_detection_group.setFont(QFont("Montserrat", 10, QFont.Weight.Medium))
+        device_detection_layout = QHBoxLayout(device_detection_group)  # Изменено на QHBoxLayout
+        device_detection_layout.setContentsMargins(20, 10, 20, 10)  # Аналогичные отступы как у выбора сервиса
+        device_detection_layout.setSpacing(30)  # Расстояние между кнопками
+        device_detection_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)  # Центрируем содержимое
+
+        # Радио-кнопки для выбора метода
+        self.port_radio = QRadioButton("По IP")
+        self.adb_radio = QRadioButton("Через ADB")
+        self.adb_radio.setChecked(True)  
+
+        device_detection_layout.addWidget(self.port_radio)
+        device_detection_layout.addWidget(self.adb_radio)
+
+        layout.addWidget(device_detection_group)
+
+        # Добавим стили для радио-кнопок (аналогично существующим в коде)
+        self.port_radio.setStyleSheet("""
+            QRadioButton {
+                color: white;
+                spacing: 8px;  /* Расстояние между кружком и текстом */
+                padding: 5px 10px;  /* Внутренние отступы */
+            }
+            QRadioButton::indicator {
+                width: 16px;
+                height: 16px;
+                border: 2px solid #3a3a3a;
+                border-radius: 8px;
+                background-color: #2b2b2b;
+            }
+            QRadioButton::indicator:checked {
+                background-color: #4CAF50;  /* Зеленый цвет для выбранного состояния */
+                border: 2px solid #4CAF50;
+            }
+            QRadioButton::indicator:hover {
+                border: 2px solid #4a4a4a;
+            }
+        """)
+        self.adb_radio.setStyleSheet("""
+            QRadioButton {
+                color: white;
+                spacing: 8px;  /* Расстояние между кружком и текстом */
+                padding: 5px 10px;  /* Внутренние отступы */
+            }
+            QRadioButton::indicator {
+                width: 16px;
+                height: 16px;
+                border: 2px solid #3a3a3a;
+                border-radius: 8px;
+                background-color: #2b2b2b;
+            }
+            QRadioButton::indicator:checked {
+                background-color: #4CAF50;  /* Зеленый цвет для выбранного состояния */
+                border: 2px solid #4CAF50;
+            }
+            QRadioButton::indicator:hover {
+                border: 2px solid #4a4a4a;
+            }
+        """)
+
+        layout.addWidget(device_detection_group)
+
+        # Сделайте поля для BlueStacks зависимыми от выбора метода
+        self.port_radio.toggled.connect(self.update_device_detection_ui)
+
         # База данных
         database_group = QGroupBox("База данных")
         database_group.setFont(QFont("Montserrat", 10, QFont.Weight.Medium))
@@ -228,7 +294,15 @@ class SettingsDialog(QDialog):
         layout.addLayout(button_layout)
         # Убрать дублирующийся service_layout
         
-
+    def update_device_detection_ui(self):
+        """Обновляет доступность полей в зависимости от выбранного метода обнаружения устройств"""
+        is_port_method = self.port_radio.isChecked()
+        
+        # Включаем/отключаем поля BlueStacks в зависимости от метода
+        self.ip_edit.setEnabled(is_port_method)
+        self.start_port.setEnabled(is_port_method)
+        self.end_port.setEnabled(is_port_method)
+        self.port_step.setEnabled(is_port_method)
     
     def browse_database(self):
         filename, _ = QFileDialog.getOpenFileName(
@@ -249,10 +323,21 @@ class SettingsDialog(QDialog):
                 self.port_step.setValue(settings.get("port_step", 10))
                 self.db_path_edit.setText(settings.get("database_path", ""))
                 self.max_plays.setValue(settings.get("max_plays_per_track", 5))
-            if settings.get("service_type") == "apple_music":
-                self.apple_radio.setChecked(True)
-            else:
-                self.spotify_radio.setChecked(True)
+                
+                # Загружаем настройку метода обнаружения устройств
+                if settings.get("use_adb_device_detection", False):
+                    self.adb_radio.setChecked(True)
+                else:
+                    self.port_radio.setChecked(True)
+                    
+                # Обновляем UI в зависимости от выбора
+                self.update_device_detection_ui()
+                
+                # Загружаем настройки для других элементов как раньше
+                if settings.get("service_type") == "apple_music":
+                    self.apple_radio.setChecked(True)
+                else:
+                    self.spotify_radio.setChecked(True)
         except FileNotFoundError:
             pass
 
@@ -266,7 +351,8 @@ class SettingsDialog(QDialog):
             "port_step": self.port_step.value(),
             "database_path": self.db_path_edit.text(),
             "service_type": "spotify" if self.spotify_radio.isChecked() else "apple_music",
-            "max_plays_per_track": self.max_plays.value()
+            "max_plays_per_track": self.max_plays.value(),
+            "use_adb_device_detection": self.adb_radio.isChecked()  # Добавляем новую настройку
         }
         
         with open("settings.json", "w") as f:

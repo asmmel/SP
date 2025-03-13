@@ -6,7 +6,8 @@ class SidebarView(QWidget):
     work_clicked = pyqtSignal()
     proxy_clicked = pyqtSignal()
     settings_clicked = pyqtSignal()
-    reset_stats_clicked = pyqtSignal()  # Новый сигнал
+    reset_stats_clicked = pyqtSignal()  # Сигнал для сброса статистики
+    stop_screens_clicked = pyqtSignal()  # Новый сигнал для остановки всех экранов
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -25,7 +26,8 @@ class SidebarView(QWidget):
             ("Работа", self.work_clicked),
             ("Restart Proxy", self.proxy_clicked),
             ("Настройки", self.settings_clicked),
-            ("Reset Plays", self.reset_stats_clicked)  # Новая кнопка
+            ("Reset Plays", self.reset_stats_clicked),
+            ("Stop All Screens", self.stop_screens_clicked)  # Новая кнопка
         ]
         
         for text, signal in button_configs:

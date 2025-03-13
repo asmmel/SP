@@ -548,6 +548,30 @@ class AppleMusicAutomation:
 
     def initialize_devices(self):
         """Инициализация списка устройств"""
+        if self.config.use_adb_device_detection:
+            # Используем ADB для получения серийных номеров устройств
+            from utils.adb_chek import ADBChecker
+            adb_checker = ADBChecker()
+            
+            if not adb_checker.initialize_environment():
+                logger.error("Failed to initialize ADB environment")
+                # Fallback на метод портов
+                self._initialize_devices_by_ports()
+                return
+                
+            device_ids = adb_checker.get_connected_devices()
+            if device_ids:
+                logger.info(f"Found {len(device_ids)} devices via ADB: {device_ids}")
+                self.devicelist = device_ids
+            else:
+                logger.warning("No devices found via ADB, falling back to IP:port method")
+                self._initialize_devices_by_ports()
+        else:
+            # Используем традиционный метод IP:порт
+            self._initialize_devices_by_ports()
+
+    def _initialize_devices_by_ports(self):
+        """Инициализация устройств по портам (исходный метод)"""
         open_ports = self.check_ports()
         if open_ports:
             logger.info(f"Открытые порты на {self.config.bluestacks_ip}: {open_ports}")

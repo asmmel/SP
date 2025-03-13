@@ -96,6 +96,14 @@ class SpotifyAutomation:
          # Добавляем инициализацию устройств сразу
         self.initialize_devices()
         self._load_cache()  # Загружаем кэш после инициализации устройств
+        self.tracks_not_found = []  # Новое поле
+
+    # И новый метод для сохранения информации:
+    def save_tracks_not_found(self):
+        """Сохранение списка не найденных треков"""
+        os.makedirs('data', exist_ok=True)
+        with open("data/spotify_tracks_not_found.json", "w") as f:
+            json.dump(self.tracks_not_found, f, indent=4)
 
     def stop(self):
         """Остановка автоматизации"""
@@ -130,13 +138,25 @@ class SpotifyAutomation:
                             caption="📊 Текущая статистика прослушиваний на момент остановки"
                         )
                         
+                # Также отправляем список ненайденных треков
+                if hasattr(self, 'tracks_not_found') and self.tracks_not_found:
+                    self.save_tracks_not_found()
+                    with open('data/spotify_tracks_not_found.json', 'rb') as file:
+                        self.bot.send_document(
+                            self.config.chat_id, 
+                            file,
+                            caption="❌ Список ненайденных треков на момент остановки"
+                        )
+                        
             except Exception as e:
                 logger.error(f"Error sending stop notification: {str(e)}")
+                logger.exception("Full error details:")
                 
             logger.info("Spotify automation stopped successfully")
             
         except Exception as e:
             logger.error(f"Error during stop process: {str(e)}")
+            logger.exception("Full error details:")
 
     def get_device_state(self, device: str) -> DeviceState:
         with self.state_lock:
@@ -227,15 +247,19 @@ class SpotifyAutomation:
             d = u2.connect(device_addr)
             self.restart_spotify(d)
             if screenshot:
-                pg.screenshot('screenshot.png')
-                with open('screenshot.png', 'rb') as img:    
+                screenshot_path = os.path.join('data', 'screenshots', f'error_{datetime.now().strftime("%Y%m%d_%H%M%S")}.png')
+                os.makedirs(os.path.dirname(screenshot_path), exist_ok=True)
+                pg.screenshot(screenshot_path)
+                with open(screenshot_path, 'rb') as img:    
                     self.bot.send_photo(self.config.chat_id, img, caption='Server Spotify Except')
         except Exception as e:
             logger.error(f"Failed to process exception for device {device_addr}: {str(e)}")
+            logger.exception("Full error details:")
 
     def _save_error_log(self, error_type: str, error: Exception):
         """Сохранение ошибок в лог"""
-        with open("errors_spotify.log", "a") as error_file:
+        os.makedirs('data/logs', exist_ok=True)
+        with open("data/logs/errors_spotify.log", "a") as error_file:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             error_file.write(f"[{timestamp}] {error_type}: {str(error)}\n")
 
@@ -251,6 +275,30 @@ class SpotifyAutomation:
 
     def initialize_devices(self):
         """Инициализация списка устройств"""
+        if self.config.use_adb_device_detection:
+            # Используем ADB для получения серийных номеров устройств
+            from utils.adb_chek import ADBChecker
+            adb_checker = ADBChecker()
+            
+            if not adb_checker.initialize_environment():
+                logger.error("Failed to initialize ADB environment")
+                # Fallback на метод портов
+                self._initialize_devices_by_ports()
+                return
+                
+            device_ids = adb_checker.get_connected_devices()
+            if device_ids:
+                logger.info(f"Found {len(device_ids)} devices via ADB: {device_ids}")
+                self.devicelist = device_ids
+            else:
+                logger.warning("No devices found via ADB, falling back to IP:port method")
+                self._initialize_devices_by_ports()
+        else:
+            # Используем традиционный метод IP:порт
+            self._initialize_devices_by_ports()
+
+    def _initialize_devices_by_ports(self):
+        """Инициализация устройств по портам (исходный метод)"""
         open_ports = self.check_ports()
         if open_ports:
             logger.info(f"Открытые порты на {self.config.bluestacks_ip}: {open_ports}")
@@ -412,7 +460,37 @@ class SpotifyAutomation:
         except Exception as e:
             logger.error(f"Failed to restart Spotify: {str(e)}")
             return False
-        
+    
+    async def restart_proxy_full(self, device: u2.Device, device_addr: str) -> bool:
+        """Полный перезапуск прокси с очисткой данных"""
+        try:
+            logger.info(f"Performing full proxy restart for {device_addr}")
+            
+            # Останавливаем все связанные приложения
+            apps_to_stop = ['com.getsurfboard', 'com.spotify.music']
+            for app in apps_to_stop:
+                device.app_stop(app)
+                await asyncio.sleep(1)
+            
+            # Запускаем Surfboard
+            device.app_start('com.getsurfboard')
+            await asyncio.sleep(3)
+            
+            # Пытаемся активировать VPN
+            if not await self.check_proxy(device, device_addr):
+                logger.error(f"Failed to activate VPN after full restart on {device_addr}")
+                return False
+                
+            # Запускаем основное приложение
+            device.app_start('com.spotify.music')
+            await asyncio.sleep(3)
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error during full proxy restart on {device_addr}: {str(e)}")
+            return False
+
     async def process_device(self, device: str):
         """Обработка одного устройства"""
         state = self.get_device_state(device)
@@ -422,74 +500,81 @@ class SpotifyAutomation:
         proxy_check_interval = 3600  # 1 час
         
         while state.songs_played < state.total_songs and self.running:
-            # Проверяем прокси каждый час
+            # Проверка прокси
             current_time = time.time()
             if current_time - last_proxy_check >= proxy_check_interval:
                 try:
                     d = u2.connect(device)
-                    if not await self.check_proxy(d, device):
-                        logger.warning(f"Proxy check failed on {device}, attempting restart")
-                        if self.config.service_type == Config.SERVICE_SPOTIFY:
-                            await self.restart_proxy_spotify(d, device)
-                        else:
-                            await self.restart_proxy_apple(d, device)
+                    proxy_status = await self.check_proxy(d, device)
+                    if not proxy_status:
+                        logger.warning(f"Proxy check failed on {device}, attempting full restart")
+                        if not await self.restart_proxy_full(d, device):
+                            logger.error(f"Failed to restore proxy functionality on {device}")
                     last_proxy_check = current_time
                 except Exception as e:
                     logger.error(f"Error during proxy check: {str(e)}")
-            # Проверяем, остались ли доступные треки для этого устройства
-            available_tracks = False
-            for i in range(1, 1000):  # Проверяем все возможные файлы
-                file_path = f"data/database_part_spotify_{i}.txt"
-                if not os.path.exists(file_path):
-                    break
-                    
-                with open(file_path) as f:
-                    for line in f:
-                        track = line.strip()
-                        if track and track not in state.played_songs and state.can_play_track(track):
-                            available_tracks = True
-                            break
-                if available_tracks:
-                    break
             
-            if not available_tracks:
-                logger.info(f"No more available tracks for device {device}")
-                break
-                
+            # Получение трека
             retries = self.config.retry_attempts
             while retries > 0 and self.running:
                 try:
                     d = u2.connect(device)
                     result = self.get_name(device)
-                    
-                    if not result or not self.running:
-                        return
+                    if not result:
+                        logger.info(f"No more available tracks for device {device}")
+                        return  # Завершаем устройство, если нет треков
                     
                     name_artist = result[0]
                     logger.info(f"Device {device}: Playing song {name_artist}")
                     await self.search_and_play(d, name_artist)
                     state.songs_played += 1
                     
-                    if hasattr(self, 'on_device_progress') and self.on_device_progress:
+                    if self.on_device_progress:
                         self.on_device_progress(device, state.songs_played, state.total_songs)
                     
                     if state.songs_played % 10 == 0:
                         self._periodic_cache_save()
-                        
-                    logger.info(f"Device {device} progress: {state.songs_played}/{state.total_songs}")
-                    break
                     
+                    logger.info(f"Device {device} progress: {state.songs_played}/{state.total_songs}")
+                    break  # Успешно проиграли, выходим из retries
+                
                 except Exception as e:
-                    logger.error(f"Error on device {device}, attempt {4-retries}: {str(e)}")
+                    logger.error(f"Error on device {device}, attempt {self.config.retry_attempts - retries + 1}: {str(e)}")
                     retries -= 1
                     if retries == 0:
                         self._handle_error("MaxRetriesExceeded", e, device, True)
                     await asyncio.sleep(5)
-                    
-                if not self.running:
-                    return
+            
+            if not self.running:
+                return
             
             await asyncio.sleep(2)
+
+    def _handle_app_not_responding(self, d):
+        """Обработка диалога о неотвечающем приложении"""
+        try:
+            # Проверяем наличие диалога
+            anr_texts = [
+                "Spotify isn't responding",
+                "isn't responding",
+                "Close app"
+            ]
+            
+            for text in anr_texts:
+                if d(text=text).exists:
+                    logger.info("Found app not responding dialog")
+                    # Ищем и нажимаем кнопку Close app
+                    close_button = d(text="Close app")
+                    if close_button.exists:
+                        close_button.click()
+                        time.sleep(2)
+                        return True
+                        
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error handling ANR dialog: {str(e)}")
+            return False
 
     async def search_and_play(self, d, name_artist: str):
         """Поиск и воспроизведение трека"""
@@ -498,6 +583,13 @@ class SpotifyAutomation:
             return
 
         d.implicitly_wait(10.0)
+        
+        # Проверяем диалог перед каждой операцией
+        if self._handle_app_not_responding(d):
+            logger.info("Restarting after ANR")
+            if not self.restart_spotify(d):
+                return
+        
         if not self.is_app_running(d, "com.spotify.music"):
             logger.info("Перезапуск Spotify...")
             if not self.restart_spotify(d):
@@ -519,15 +611,16 @@ class SpotifyAutomation:
             song_element.click()
         else:
             logger.info(f"Песня с '{artist_name}' не найдена. Выбор первого результата.")
-            # d.xpath('//*[@resource-id="com.spotify.music:id/search_content_recyclerview"]/android.view.ViewGroup[1]').click()
-            # d.xpath('//*[@resource-id="com.spotify.music:id/search_content_recyclerview"]/android.view.ViewGroup[1]').click()
             first_song = d(textMatches="Song • .*", instance=0)
             if first_song.exists:
                 logger.info(f"Найдена песня: {first_song.get_text()}")
                 first_song.click()
             else:
-                logger.info("Песни не найдены, выбор первого результата")
-
+                logger.info(f"Песни не найдены для {name_artist}")
+                # Добавляем в список ненайденных
+                self.tracks_not_found.append(name_artist)
+                d(resourceId="com.spotify.music:id/clear_query_button").click()
+                return
 
         time.sleep(1.5)
         d(resourceId="com.spotify.music:id/clear_query_button").click()
@@ -695,28 +788,51 @@ class SpotifyAutomation:
         return current_app["package"] == package_name if current_app else False
     
     async def check_proxy(self, device: u2.Device, device_addr: str) -> bool:
-        """Проверка состояния прокси"""
+        """Проверка состояния прокси и его активация при необходимости"""
         try:
+            logger.info(f"Checking proxy status for device {device_addr}")
+            
             # Сохраняем текущее приложение
             current_app = device.app_current()
             
             # Запускаем Surfboard
             device.app_start('com.getsurfboard')
-            await asyncio.sleep(2)
+            await asyncio.sleep(3)  # Даем больше времени на загрузку
             
-            # Проверяем статус VPN
-            if device(description="Stop VPN").exists:
-                logger.info(f"VPN is active on {device_addr}")
-                result = True
-            else:
-                logger.warning(f"VPN is not active on {device_addr}")
-                # Пробуем перезапустить VPN
-                if device(description="Start VPN").exists:
+            retry_attempts = 3
+            result = False
+            
+            while retry_attempts > 0:
+                # Проверяем статус VPN
+                if device(description="Stop VPN").exists:
+                    logger.info(f"VPN is active on {device_addr}")
+                    result = True
+                    break
+                elif device(description="Start VPN").exists:
+                    logger.info(f"Starting VPN on {device_addr}")
                     device(description="Start VPN").click()
-                    await asyncio.sleep(2)
-                    result = device(description="Stop VPN").exists
+                    await asyncio.sleep(3)  # Ждем подключения
+                    
+                    # Проверяем успешность подключения
+                    if device(description="Stop VPN").exists:
+                        logger.info(f"VPN successfully started on {device_addr}")
+                        result = True
+                        break
+                    else:
+                        logger.warning(f"Failed to start VPN, retrying... ({retry_attempts} attempts left)")
+                        retry_attempts -= 1
                 else:
-                    result = False
+                    # Если не найдены кнопки Start/Stop VPN
+                    logger.error(f"VPN buttons not found on {device_addr}")
+                    # Пробуем перезапустить приложение
+                    device.app_stop('com.getsurfboard')
+                    await asyncio.sleep(1)
+                    device.app_start('com.getsurfboard')
+                    await asyncio.sleep(3)
+                    retry_attempts -= 1
+                    
+                if retry_attempts == 0:
+                    logger.error(f"Failed to start VPN after all attempts on {device_addr}")
             
             # Возвращаемся к предыдущему приложению
             if current_app:
@@ -724,9 +840,15 @@ class SpotifyAutomation:
                 await asyncio.sleep(2)
                 
             return result
-            
+                
         except Exception as e:
             logger.error(f"Error checking proxy on {device_addr}: {str(e)}")
+            # В случае ошибки пытаемся вернуться к предыдущему приложению
+            if current_app:
+                try:
+                    device.app_start(current_app["package"])
+                except:
+                    pass
             return False
 
     def check_play_limits_reached(self) -> bool:
@@ -794,8 +916,19 @@ class SpotifyAutomation:
             with open('data/spotify_cache.json', 'rb') as file:
                 self.bot.send_document(self.config.chat_id, file)
                 
+            # Сохраняем и отправляем список ненайденных треков
+            if self.tracks_not_found:
+                self.save_tracks_not_found()
+                with open('data/spotify_tracks_not_found.json', 'rb') as file:
+                    self.bot.send_document(
+                        self.config.chat_id, 
+                        file,
+                        caption="❌ Список ненайденных треков на момент завершения"
+                    )
+                    
         except Exception as e:
             logger.error(f"Failed to send completion report: {str(e)}")
+            logger.exception("Full exception details:")
 
     async def main(self):
         try:

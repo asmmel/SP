@@ -2,9 +2,9 @@ import sys
 import os
 import json
 import logging
-from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QMessageBox,QSizePolicy
+from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QMessageBox, QSizePolicy
 from PyQt6.QtGui import QIcon
-from PyQt6.QtCore import Qt, pyqtSlot
+from PyQt6.QtCore import Qt, pyqtSlot, QTimer
 import socket
 # Импортируем наши виджеты
 from .views.sidebar_view import SidebarView
@@ -22,7 +22,7 @@ from core.spotify_worker import SpotifyWorker
 from core.apple_music_worker import AppleMusicWorker
 logger = logging.getLogger(__name__)
 from ui.styles import apply_theme
-
+from utils.scrcpy_manager import ScrcpyManager
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -56,7 +56,14 @@ class MainWindow(QMainWindow):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         
         self.worker = None
+        self.scrcpy_manager = ScrcpyManager()
         self.setup_ui()
+        
+        # Настраиваем таймер для проверки состояния scrcpy
+        self.scrcpy_check_timer = QTimer(self)
+        self.scrcpy_check_timer.timeout.connect(self.check_scrcpy_statuses)
+        self.scrcpy_check_timer.start(2000)  # Проверка каждые 2 секунды
+        
         apply_theme(self)
         
     def setup_ui(self):
@@ -74,6 +81,8 @@ class MainWindow(QMainWindow):
         self.sidebar.setFixedWidth(200)  # Уменьшаем ширину сайдбара
         self.sidebar.proxy_clicked.connect(self.restart_proxy)
         self.sidebar.settings_clicked.connect(self.show_settings)
+        self.sidebar.reset_stats_clicked.connect(self.reset_play_statistics)
+        self.sidebar.stop_screens_clicked.connect(self.stop_all_scrcpy)  # Подключаем новый сигнал
         main_layout.addWidget(self.sidebar)
         
         # Создаем правую часть с возможностью растяжения
@@ -111,7 +120,6 @@ class MainWindow(QMainWindow):
         right_layout.addLayout(button_layout)
         main_layout.addWidget(right_widget)
         
-        self.sidebar.reset_stats_clicked.connect(self.reset_play_statistics)
         # Применяем стили
         self.setStyleSheet("""
             QMainWindow {
@@ -137,6 +145,70 @@ class MainWindow(QMainWindow):
                 color: #666666;
             }
         """)
+        self.device_view.monitoring_toggled.connect(self.toggle_device_monitoring)
+
+    def toggle_device_monitoring(self, device_id: str, start_monitoring: bool):
+        """Включение/выключение мониторинга устройства"""
+        try:
+            if start_monitoring:
+                # Запускаем мониторинг
+                success = self.scrcpy_manager.start_scrcpy(
+                    device_id,
+                    window_title=f"Monitoring {device_id}"
+                )
+                
+                if success:
+                    self.log_view.append_log(f"Мониторинг устройства {device_id} запущен")
+                else:
+                    self.log_view.append_log(f"Не удалось запустить мониторинг устройства {device_id}")
+            else:
+                # Останавливаем мониторинг
+                success = self.scrcpy_manager.stop_scrcpy(device_id)
+                if success:
+                    self.log_view.append_log(f"Мониторинг устройства {device_id} остановлен")
+                else:
+                    self.log_view.append_log(f"Не удалось остановить мониторинг устройства {device_id}")
+        except Exception as e:
+            self.log_view.append_log(f"Ошибка при управлении мониторингом: {str(e)}")
+            
+    def stop_all_scrcpy(self):
+        """Остановка всех запущенных экранов устройств"""
+        if hasattr(self, 'scrcpy_manager'):
+            success = self.scrcpy_manager.stop_all()
+            if success:
+                self.log_view.append_log("Все экраны устройств закрыты")
+                # Обновляем статусы мониторинга в UI
+                for device_id in self.device_view.monitored_devices.copy():
+                    self.device_view.monitored_devices.remove(device_id)
+                    # Обновляем визуально карточку
+                    if device_id in self.device_view.cards:
+                        progress_text = self.device_view.cards[device_id].progress_label.text()
+                        try:
+                            percentage = float(progress_text.strip('%'))
+                            self.device_view.cards[device_id].update_progress(percentage, False)
+                        except ValueError:
+                            pass
+            else:
+                self.log_view.append_log("Не удалось закрыть все экраны устройств")
+                
+    def check_scrcpy_statuses(self):
+        """Проверка статусов окон scrcpy и обновление UI"""
+        if hasattr(self, 'scrcpy_manager') and hasattr(self, 'device_view'):
+            # Получаем текущие запущенные устройства
+            running_devices = set(self.scrcpy_manager.get_running_devices())
+            
+            # Обновляем UI для устройств, которые больше не запущены
+            for device_id in self.device_view.monitored_devices.copy():
+                if device_id not in running_devices:
+                    self.device_view.monitored_devices.remove(device_id)
+                    # Обновляем визуально карточку
+                    if device_id in self.device_view.cards:
+                        progress_text = self.device_view.cards[device_id].progress_label.text()
+                        try:
+                            percentage = float(progress_text.strip('%'))
+                            self.device_view.cards[device_id].update_progress(percentage, False)
+                        except ValueError:
+                            pass
 
     def reset_play_statistics(self):
         """Обработчик сброса статистики прослушиваний"""
@@ -342,7 +414,16 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(str, str)
     def handle_log_message(self, level: str, message: str):
-        """Обработка сообщений лога"""
+        """Обработка сообщений лога с фильтрацией ненужных сообщений"""
+        # Игнорируем детальные логи запуска scrcpy
+        if "Запуск scrcpy с командой:" in message:
+            return
+            
+        # Игнорируем предупреждения о устаревших параметрах
+        if "WARN: --rotation is deprecated" in message:
+            return
+            
+        # Логируем остальные сообщения
         self.log_view.append_log(message)
 
     def restart_proxy(self):
@@ -484,6 +565,10 @@ class MainWindow(QMainWindow):
 
 
     def closeEvent(self, event):
+        # Останавливаем все запущенные окна scrcpy перед закрытием приложения
+        self.scrcpy_manager.stop_all()
+        
+        # Проверяем, есть ли запущенные рабочие потоки
         running_workers = []
         if hasattr(self, 'worker') and self.worker and self.worker.isRunning():
             running_workers.append("Main worker")
@@ -491,6 +576,7 @@ class MainWindow(QMainWindow):
             running_workers.append("Proxy worker")
             
         if running_workers:
+            # Показываем диалог подтверждения выхода
             msg_box = QMessageBox(self)
             msg_box.setWindowTitle('Confirm Exit')
             msg_box.setText(f"The following processes are still running:\n{', '.join(running_workers)}\n\nDo you want to stop them and exit?")
@@ -519,17 +605,25 @@ class MainWindow(QMainWindow):
                 QPushButton:pressed {
                     background-color: #2a2a2a;
                 }
-            """)  # Добавить стили
+            """)
             
             reply = msg_box.exec()
             
             if reply == QMessageBox.StandardButton.Yes:
+                # Останавливаем запущенные процессы
                 if hasattr(self, 'worker') and self.worker and self.worker.isRunning():
                     self.worker.stop()
+                    self.worker.wait(1000)  # Ждем до 1 секунды
+                
                 if hasattr(self, 'proxy_worker') and self.proxy_worker and self.proxy_worker.isRunning():
                     self.proxy_worker.stop()
+                    self.proxy_worker.wait(1000)  # Ждем до 1 секунды
+                
+                # Принимаем событие закрытия
                 event.accept()
             else:
+                # Отменяем закрытие приложения
                 event.ignore()
         else:
+            # Если нет запущенных процессов, просто закрываем приложение
             event.accept()

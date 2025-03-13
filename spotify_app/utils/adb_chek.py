@@ -18,11 +18,21 @@ class ADBChecker:
                 './resources/adb/adb.exe'  # bundled with exe
             ]
             
+            # Создаем startupinfo для скрытия консоли (только на Windows)
+            startupinfo = None
+            if os.name == 'nt':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = 0  # SW_HIDE
+            
             for path in adb_paths:
                 try:
-                    result = subprocess.run([path, 'version'], 
-                                         capture_output=True, 
-                                         text=True)
+                    result = subprocess.run(
+                        [path, 'version'], 
+                        capture_output=True, 
+                        text=True,
+                        startupinfo=startupinfo
+                    )
                     if result.returncode == 0:
                         return True, path
                 except FileNotFoundError:
@@ -40,9 +50,19 @@ class ADBChecker:
         
         # Проверяем через ADB
         try:
-            result = subprocess.run(['adb', 'devices'], 
-                                 capture_output=True, 
-                                 text=True)
+            # Создаем startupinfo для скрытия консоли (только на Windows)
+            startupinfo = None
+            if os.name == 'nt':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = 0  # SW_HIDE
+                
+            result = subprocess.run(
+                ['adb', 'devices'], 
+                capture_output=True, 
+                text=True,
+                startupinfo=startupinfo
+            )
             self.logger.info(f"ADB devices output: {result.stdout}")
         except Exception as e:
             self.logger.error(f"Error running adb devices: {str(e)}")
@@ -82,3 +102,41 @@ class ADBChecker:
         except Exception as e:
             self.logger.error(f"Error initializing environment: {str(e)}")
             return False
+        
+
+    def get_connected_devices(self) -> List[str]:
+        """Получает список подключенных устройств через ADB"""
+        try:
+            adb_success, adb_path = self.check_adb_path()
+            if not adb_success:
+                self.logger.error("ADB not found")
+                return []
+            
+            # Создаем startupinfo для скрытия консоли (только на Windows)
+            startupinfo = None
+            if os.name == 'nt':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = 0  # SW_HIDE
+                
+            result = subprocess.run(
+                [adb_path, 'devices'], 
+                capture_output=True, 
+                text=True,
+                startupinfo=startupinfo
+            )
+            
+            devices = []
+            lines = result.stdout.strip().split('\n')
+            # Пропускаем заголовок "List of devices attached"
+            for line in lines[1:]:
+                if line.strip():
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[1] in ['device', 'emulator']:
+                        devices.append(parts[0])
+                        
+            self.logger.info(f"Found {len(devices)} connected devices via ADB")
+            return devices
+        except Exception as e:
+            self.logger.error(f"Error getting connected devices: {str(e)}")
+            return []

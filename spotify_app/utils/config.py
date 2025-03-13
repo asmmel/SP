@@ -7,7 +7,7 @@ class Config:
     # Константы сервисов
     SERVICE_SPOTIFY = 'spotify'
     SERVICE_APPLE_MUSIC = 'apple_music'
-
+    use_adb_device_detection: bool = False  # По умолчанию используем IP:порт
     # Основные параметры с значениями по умолчанию
     token: str = '5955885685:AAFm1FIHK_b6Nf-WvaSHSjbv0YUa55ObKcw'
     bluestacks_ip: str = '127.0.0.1'
