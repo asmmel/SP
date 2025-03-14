@@ -84,52 +84,6 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(device_detection_group)
 
-        # Добавим стили для радио-кнопок (аналогично существующим в коде)
-        self.port_radio.setStyleSheet("""
-            QRadioButton {
-                color: white;
-                spacing: 8px;  /* Расстояние между кружком и текстом */
-                padding: 5px 10px;  /* Внутренние отступы */
-            }
-            QRadioButton::indicator {
-                width: 16px;
-                height: 16px;
-                border: 2px solid #3a3a3a;
-                border-radius: 8px;
-                background-color: #2b2b2b;
-            }
-            QRadioButton::indicator:checked {
-                background-color: #4CAF50;  /* Зеленый цвет для выбранного состояния */
-                border: 2px solid #4CAF50;
-            }
-            QRadioButton::indicator:hover {
-                border: 2px solid #4a4a4a;
-            }
-        """)
-        self.adb_radio.setStyleSheet("""
-            QRadioButton {
-                color: white;
-                spacing: 8px;  /* Расстояние между кружком и текстом */
-                padding: 5px 10px;  /* Внутренние отступы */
-            }
-            QRadioButton::indicator {
-                width: 16px;
-                height: 16px;
-                border: 2px solid #3a3a3a;
-                border-radius: 8px;
-                background-color: #2b2b2b;
-            }
-            QRadioButton::indicator:checked {
-                background-color: #4CAF50;  /* Зеленый цвет для выбранного состояния */
-                border: 2px solid #4CAF50;
-            }
-            QRadioButton::indicator:hover {
-                border: 2px solid #4a4a4a;
-            }
-        """)
-
-        layout.addWidget(device_detection_group)
-
         # Сделайте поля для BlueStacks зависимыми от выбора метода
         self.port_radio.toggled.connect(self.update_device_detection_ui)
 
@@ -219,14 +173,19 @@ class SettingsDialog(QDialog):
 
         self.spotify_radio = QRadioButton("Spotify")
         self.apple_radio = QRadioButton("Apple Music")
+        self.mix_radio = QRadioButton("Mix")
         self.spotify_radio.setChecked(True)
 
         service_layout.addWidget(self.spotify_radio)
         service_layout.addWidget(self.apple_radio)
+        service_layout.addWidget(self.mix_radio)
         layout.addWidget(service_group)
+        
+        # Подключаем обработчик событий для Mix-режима
+        self.mix_radio.toggled.connect(self.update_mix_mode_ui)
 
-        # Обновляем стили для радио-кнопок
-        self.spotify_radio.setStyleSheet("""
+        # Общий стиль для радио-кнопок
+        radio_style = """
             QRadioButton {
                 color: white;
                 spacing: 8px;  /* Расстояние между кружком и текстом */
@@ -246,29 +205,12 @@ class SettingsDialog(QDialog):
             QRadioButton::indicator:hover {
                 border: 2px solid #4a4a4a;
             }
-        """)
-        self.apple_radio.setStyleSheet("""
-            QRadioButton {
-                color: white;
-                spacing: 8px;  /* Расстояние между кружком и текстом */
-                padding: 5px 10px;  /* Внутренние отступы */
-            }
-            QRadioButton::indicator {
-                width: 16px;
-                height: 16px;
-                border: 2px solid #3a3a3a;
-                border-radius: 8px;
-                background-color: #2b2b2b;
-            }
-            QRadioButton::indicator:checked {
-                background-color: #4CAF50;  /* Зеленый цвет для выбранного состояния */
-                border: 2px solid #4CAF50;
-            }
-            QRadioButton::indicator:hover {
-                border: 2px solid #4a4a4a;
-            }
-        """)
-
+        """
+        
+        # Применяем стиль ко всем радио-кнопкам
+        self.spotify_radio.setStyleSheet(radio_style)
+        self.apple_radio.setStyleSheet(radio_style)
+        self.mix_radio.setStyleSheet(radio_style)
 
         # Добавляем настройку максимального количества проигрываний
         plays_group = QGroupBox("Ограничения")
@@ -278,6 +220,40 @@ class SettingsDialog(QDialog):
         self.max_plays.setValue(5)
         plays_layout.addRow("Макс. проигрываний трека:", self.max_plays)
         layout.addWidget(plays_group)
+        
+        # Добавляем настройки для Mix-режима
+        self.mix_group = QGroupBox("Настройки Mix режима")
+        self.mix_group.setFont(QFont("Montserrat", 10, QFont.Weight.Medium))
+        mix_layout = QFormLayout(self.mix_group)
+        
+        # Добавляем поля для ввода диапазона времени работы сервиса (в секундах)
+        self.mix_min_time = QSpinBox()
+        self.mix_min_time.setRange(60, 3600)  # от 1 минуты до 1 часа
+        self.mix_min_time.setValue(300)  # 5 минут по умолчанию
+        self.mix_min_time.setSingleStep(60)  # шаг в 1 минуту
+        self.mix_min_time.setSuffix(" сек")
+        
+        self.mix_max_time = QSpinBox()
+        self.mix_max_time.setRange(300, 7200)  # от 5 минут до 2 часов
+        self.mix_max_time.setValue(1800)  # 30 минут по умолчанию
+        self.mix_max_time.setSingleStep(60)  # шаг в 1 минуту
+        self.mix_max_time.setSuffix(" сек")
+        
+        # Добавляем поля в форму
+        mix_layout.addRow("Минимальное время работы:", self.mix_min_time)
+        mix_layout.addRow("Максимальное время работы:", self.mix_max_time)
+        
+        # Добавляем помощник по времени
+        help_label = QLabel("Укажите диапазон времени работы каждого сервиса (в секундах).\n"
+                          "Сервисы будут чередоваться, работая случайное время из указанного диапазона.")
+        help_label.setStyleSheet("color: #cccccc; font-size: 10px;")
+        help_label.setWordWrap(True)
+        mix_layout.addRow(help_label)
+        
+        layout.addWidget(self.mix_group)
+        
+        # По умолчанию группа настроек Mix скрыта
+        self.mix_group.setVisible(False)
 
         # Кнопки (перемещаем в конец)
         button_layout = QHBoxLayout()
@@ -292,7 +268,6 @@ class SettingsDialog(QDialog):
         button_layout.addWidget(save_button)
         button_layout.addWidget(cancel_button)
         layout.addLayout(button_layout)
-        # Убрать дублирующийся service_layout
         
     def update_device_detection_ui(self):
         """Обновляет доступность полей в зависимости от выбранного метода обнаружения устройств"""
@@ -303,6 +278,10 @@ class SettingsDialog(QDialog):
         self.start_port.setEnabled(is_port_method)
         self.end_port.setEnabled(is_port_method)
         self.port_step.setEnabled(is_port_method)
+    
+    def update_mix_mode_ui(self):
+        """Обновляет видимость настроек Mix-режима"""
+        self.mix_group.setVisible(self.mix_radio.isChecked())
     
     def browse_database(self):
         filename, _ = QFileDialog.getOpenFileName(
@@ -324,6 +303,10 @@ class SettingsDialog(QDialog):
                 self.db_path_edit.setText(settings.get("database_path", ""))
                 self.max_plays.setValue(settings.get("max_plays_per_track", 5))
                 
+                # Загружаем настройки Mix-режима
+                self.mix_min_time.setValue(settings.get("mix_min_time", 300))
+                self.mix_max_time.setValue(settings.get("mix_max_time", 1800))
+                
                 # Загружаем настройку метода обнаружения устройств
                 if settings.get("use_adb_device_detection", False):
                     self.adb_radio.setChecked(True)
@@ -333,15 +316,32 @@ class SettingsDialog(QDialog):
                 # Обновляем UI в зависимости от выбора
                 self.update_device_detection_ui()
                 
-                # Загружаем настройки для других элементов как раньше
-                if settings.get("service_type") == "apple_music":
+                # Загружаем настройки для выбора сервиса
+                service_type = settings.get("service_type", "spotify")
+                if service_type == "apple_music":
                     self.apple_radio.setChecked(True)
+                elif service_type == "mix":
+                    self.mix_radio.setChecked(True)
                 else:
                     self.spotify_radio.setChecked(True)
+                
+                # Обновляем UI для Mix-режима
+                self.update_mix_mode_ui()
+                
         except FileNotFoundError:
             pass
 
     def save_settings(self):
+        # Определяем тип сервиса на основе выбранной радиокнопки
+        if self.spotify_radio.isChecked():
+            service_type = "spotify"
+        elif self.apple_radio.isChecked():
+            service_type = "apple_music"
+        elif self.mix_radio.isChecked():
+            service_type = "mix"
+        else:
+            service_type = "spotify"  # По умолчанию
+        
         settings = {
             "token": self.token_edit.text(),
             "chat_id": self.chat_id_edit.text(),
@@ -350,9 +350,13 @@ class SettingsDialog(QDialog):
             "end_port": self.end_port.value(),
             "port_step": self.port_step.value(),
             "database_path": self.db_path_edit.text(),
-            "service_type": "spotify" if self.spotify_radio.isChecked() else "apple_music",
+            "service_type": service_type,
             "max_plays_per_track": self.max_plays.value(),
-            "use_adb_device_detection": self.adb_radio.isChecked()  # Добавляем новую настройку
+            "use_adb_device_detection": self.adb_radio.isChecked(),  # Сохраняем выбор метода обнаружения
+            
+            # Сохраняем настройки Mix-режима
+            "mix_min_time": self.mix_min_time.value(),
+            "mix_max_time": self.mix_max_time.value()
         }
         
         with open("settings.json", "w") as f:

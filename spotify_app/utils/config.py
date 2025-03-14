@@ -7,7 +7,8 @@ class Config:
     # Константы сервисов
     SERVICE_SPOTIFY = 'spotify'
     SERVICE_APPLE_MUSIC = 'apple_music'
-    use_adb_device_detection: bool = False  # По умолчанию используем IP:порт
+    SERVICE_MIX = 'mix'
+    
     # Основные параметры с значениями по умолчанию
     token: str = '5955885685:AAFm1FIHK_b6Nf-WvaSHSjbv0YUa55ObKcw'
     bluestacks_ip: str = '127.0.0.1'
@@ -21,6 +22,11 @@ class Config:
     max_plays_per_track: int = 5
     database_path: str = 'database.txt'
     service_type: str = SERVICE_SPOTIFY
+    use_adb_device_detection: bool = False  # По умолчанию используем IP:порт
+    
+    # Параметры для Mix-режима
+    mix_min_time: int = 300  # Минимальное время в секундах (5 минут)
+    mix_max_time: int = 1800  # Максимальное время в секундах (30 минут)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'Config':
@@ -46,7 +52,7 @@ class Config:
         
         # Проверяем и корректируем service_type
         service_type = settings.get('service_type', cls.SERVICE_SPOTIFY)
-        if service_type not in [cls.SERVICE_SPOTIFY, cls.SERVICE_APPLE_MUSIC]:
+        if service_type not in [cls.SERVICE_SPOTIFY, cls.SERVICE_APPLE_MUSIC, cls.SERVICE_MIX]:
             service_type = cls.SERVICE_SPOTIFY
 
         settings['service_type'] = service_type

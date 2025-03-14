@@ -9,6 +9,7 @@ import socket
 # Импортируем наши виджеты
 from .views.sidebar_view import SidebarView
 from .views.device_view import DeviceView
+from .views.split_device_view import SplitDeviceView  # Новый вид для Mix-режима
 from .views.log_view import LogView
 from .dialogs.settings_dialog import SettingsDialog
 from core.proxy_worker import ProxyWorker
@@ -20,6 +21,7 @@ import ctypes
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.spotify_worker import SpotifyWorker
 from core.apple_music_worker import AppleMusicWorker
+from core.mix_worker import MixWorker  # Новый рабочий поток для Mix-режима
 logger = logging.getLogger(__name__)
 from ui.styles import apply_theme
 from utils.scrcpy_manager import ScrcpyManager
@@ -64,6 +66,17 @@ class MainWindow(QMainWindow):
         self.scrcpy_check_timer.timeout.connect(self.check_scrcpy_statuses)
         self.scrcpy_check_timer.start(2000)  # Проверка каждые 2 секунды
         
+        # Инициализируем виды устройств (стандартный и разделенный)
+        self.device_view = None
+        self.split_device_view = None
+        
+        # Загружаем настройки для определения начального вида
+        config = self.load_config()
+        if config and config.get('service_type') == 'mix':
+            self.init_split_device_view()
+        else:
+            self.init_device_view()
+        
         apply_theme(self)
         
     def setup_ui(self):
@@ -72,9 +85,9 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         
         # Основной горизонтальный layout
-        main_layout = QHBoxLayout(central_widget)
-        main_layout.setSpacing(0)
-        main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout = QHBoxLayout(central_widget)
+        self.main_layout.setSpacing(0)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
         
         # Добавляем боковую панель с фиксированной шириной
         self.sidebar = SidebarView()
@@ -83,24 +96,21 @@ class MainWindow(QMainWindow):
         self.sidebar.settings_clicked.connect(self.show_settings)
         self.sidebar.reset_stats_clicked.connect(self.reset_play_statistics)
         self.sidebar.stop_screens_clicked.connect(self.stop_all_scrcpy)  # Подключаем новый сигнал
-        main_layout.addWidget(self.sidebar)
+        self.main_layout.addWidget(self.sidebar)
         
         # Создаем правую часть с возможностью растяжения
-        right_widget = QWidget()
-        right_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        right_layout = QVBoxLayout(right_widget)
-        right_layout.setContentsMargins(15, 15, 15, 15)
-        right_layout.setSpacing(10)
-        
-        # Добавляем отображение устройств
-        self.device_view = DeviceView()
-        self.device_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        right_layout.addWidget(self.device_view)
+        self.right_widget = QWidget()
+        self.right_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.right_layout = QVBoxLayout(self.right_widget)
+        self.right_layout.setContentsMargins(15, 15, 15, 15)
+        self.right_layout.setSpacing(10)
+
+        # Виды устройств будут инициализированы в init_device_view или init_split_device_view
         
         # Добавляем лог с фиксированной высотой
         self.log_view = LogView()
         self.log_view.setFixedHeight(150)  # Уменьшаем высоту лога
-        right_layout.addWidget(self.log_view)
+        self.right_layout.addWidget(self.log_view)
         
         # Кнопки управления
         button_layout = QHBoxLayout()
@@ -117,8 +127,8 @@ class MainWindow(QMainWindow):
         self.stop_button.setEnabled(False)
         button_layout.addWidget(self.stop_button)
         
-        right_layout.addLayout(button_layout)
-        main_layout.addWidget(right_widget)
+        self.right_layout.addLayout(button_layout)
+        self.main_layout.addWidget(self.right_widget)
         
         # Применяем стили
         self.setStyleSheet("""
@@ -145,7 +155,42 @@ class MainWindow(QMainWindow):
                 color: #666666;
             }
         """)
+    
+    def init_device_view(self):
+        """Инициализация стандартного вида устройств (для Spotify или Apple Music)"""
+        # Если уже есть split_device_view, удаляем его
+        if self.split_device_view:
+            self.right_layout.removeWidget(self.split_device_view)
+            self.split_device_view.deleteLater()
+            self.split_device_view = None
+        
+        # Создаем обычный вид устройств
+        self.device_view = DeviceView()
+        self.device_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.device_view.monitoring_toggled.connect(self.toggle_device_monitoring)
+        
+        # Добавляем в layout как первый элемент (перед log_view)
+        self.right_layout.insertWidget(0, self.device_view)
+        
+        logger.info("Инициализирован стандартный вид устройств")
+    
+    def init_split_device_view(self):
+        """Инициализация разделенного вида устройств (для Mix-режима)"""
+        # Если уже есть device_view, удаляем его
+        if self.device_view:
+            self.right_layout.removeWidget(self.device_view)
+            self.device_view.deleteLater()
+            self.device_view = None
+        
+        # Создаем разделенный вид устройств
+        self.split_device_view = SplitDeviceView()
+        self.split_device_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.split_device_view.monitoring_toggled.connect(self.toggle_device_monitoring)
+        
+        # Добавляем в layout как первый элемент (перед log_view)
+        self.right_layout.insertWidget(0, self.split_device_view)
+        
+        logger.info("Инициализирован разделенный вид устройств для Mix-режима")
 
     def toggle_device_monitoring(self, device_id: str, start_monitoring: bool):
         """Включение/выключение мониторинга устройства"""
@@ -168,6 +213,13 @@ class MainWindow(QMainWindow):
                     self.log_view.append_log(f"Мониторинг устройства {device_id} остановлен")
                 else:
                     self.log_view.append_log(f"Не удалось остановить мониторинг устройства {device_id}")
+            
+            # Обновляем статус мониторинга в UI
+            if self.device_view:
+                self.device_view.monitored_devices = set(self.scrcpy_manager.get_running_devices())
+            elif self.split_device_view:
+                self.split_device_view.monitored_devices = set(self.scrcpy_manager.get_running_devices())
+                
         except Exception as e:
             self.log_view.append_log(f"Ошибка при управлении мониторингом: {str(e)}")
             
@@ -177,38 +229,62 @@ class MainWindow(QMainWindow):
             success = self.scrcpy_manager.stop_all()
             if success:
                 self.log_view.append_log("Все экраны устройств закрыты")
-                # Обновляем статусы мониторинга в UI
-                for device_id in self.device_view.monitored_devices.copy():
-                    self.device_view.monitored_devices.remove(device_id)
-                    # Обновляем визуально карточку
-                    if device_id in self.device_view.cards:
-                        progress_text = self.device_view.cards[device_id].progress_label.text()
+                
+                # Обновляем статусы мониторинга во всех существующих видах
+                if self.device_view:
+                    self.device_view.monitored_devices.clear()
+                    # Обновляем карточки
+                    for device_id, card in self.device_view.cards.items():
+                        progress_text = card.progress_label.text()
                         try:
                             percentage = float(progress_text.strip('%'))
-                            self.device_view.cards[device_id].update_progress(percentage, False)
+                            card.update_progress(percentage, False)
                         except ValueError:
                             pass
+                            
+                if self.split_device_view:
+                    self.split_device_view.monitored_devices.clear()
+                    # Обновляем карточки
+                    for device_id, card in self.split_device_view.cards.items():
+                        spotify_progress = self.split_device_view.device_progress.get(device_id, {}).get('spotify', 0)
+                        apple_progress = self.split_device_view.device_progress.get(device_id, {}).get('apple_music', 0)
+                        active_service = self.split_device_view.active_services.get(device_id)
+                        card.update_progress(spotify_progress, apple_progress, active_service, False)
             else:
                 self.log_view.append_log("Не удалось закрыть все экраны устройств")
                 
     def check_scrcpy_statuses(self):
         """Проверка статусов окон scrcpy и обновление UI"""
-        if hasattr(self, 'scrcpy_manager') and hasattr(self, 'device_view'):
+        if hasattr(self, 'scrcpy_manager'):
             # Получаем текущие запущенные устройства
             running_devices = set(self.scrcpy_manager.get_running_devices())
             
-            # Обновляем UI для устройств, которые больше не запущены
-            for device_id in self.device_view.monitored_devices.copy():
-                if device_id not in running_devices:
-                    self.device_view.monitored_devices.remove(device_id)
-                    # Обновляем визуально карточку
-                    if device_id in self.device_view.cards:
-                        progress_text = self.device_view.cards[device_id].progress_label.text()
-                        try:
-                            percentage = float(progress_text.strip('%'))
-                            self.device_view.cards[device_id].update_progress(percentage, False)
-                        except ValueError:
-                            pass
+            # Обновляем UI для устройств в зависимости от того, какой вид активен
+            if self.device_view:
+                for device_id in self.device_view.monitored_devices.copy():
+                    if device_id not in running_devices:
+                        self.device_view.monitored_devices.remove(device_id)
+                        # Обновляем визуально карточку
+                        if device_id in self.device_view.cards:
+                            progress_text = self.device_view.cards[device_id].progress_label.text()
+                            try:
+                                percentage = float(progress_text.strip('%'))
+                                self.device_view.cards[device_id].update_progress(percentage, False)
+                            except ValueError:
+                                pass
+            
+            elif self.split_device_view:
+                for device_id in self.split_device_view.monitored_devices.copy():
+                    if device_id not in running_devices:
+                        self.split_device_view.monitored_devices.remove(device_id)
+                        # Обновляем визуально карточку
+                        if device_id in self.split_device_view.cards:
+                            spotify_progress = self.split_device_view.device_progress.get(device_id, {}).get('spotify', 0)
+                            apple_progress = self.split_device_view.device_progress.get(device_id, {}).get('apple_music', 0)
+                            active_service = self.split_device_view.active_services.get(device_id)
+                            self.split_device_view.cards[device_id].update_progress(
+                                spotify_progress, apple_progress, active_service, False
+                            )
 
     def reset_play_statistics(self):
         """Обработчик сброса статистики прослушиваний"""
@@ -220,9 +296,21 @@ class MainWindow(QMainWindow):
                 return
 
             service_type = config.get('service_type', 'spotify')
-            service_name = "Spotify" if service_type == "spotify" else "Apple Music"
-            stats_file = f"data/{service_type}_track_plays.json"
+            
+            # Определяем сервисы для сброса
+            services_to_reset = []
+            if service_type == "mix":
+                services_to_reset = ["Spotify и Apple Music"]
+                stats_files = ['data/spotify_track_plays.json', 'data/apple_track_plays.json']
+            elif service_type == "spotify":
+                services_to_reset = ["Spotify"]
+                stats_files = ['data/spotify_track_plays.json']
+            else:  # apple_music
+                services_to_reset = ["Apple Music"]
+                stats_files = ['data/apple_track_plays.json']
 
+            service_name = ", ".join(services_to_reset)
+            
             msg_box = QMessageBox(self)
             msg_box.setWindowTitle('Сброс статистики')
             msg_box.setText(f"Вы уверены, что хотите сбросить статистику прослушиваний для {service_name}?\n"
@@ -258,7 +346,7 @@ class MainWindow(QMainWindow):
             
             if reply == QMessageBox.StandardButton.Yes:
                 # Проверяем, есть ли активный worker
-                if self.worker and isinstance(self.worker, (SpotifyWorker, AppleMusicWorker)):
+                if self.worker:
                     # Используем метод worker'а для сброса статистики
                     success = self.worker.reset_statistics()
                     if success:
@@ -269,21 +357,27 @@ class MainWindow(QMainWindow):
                         QMessageBox.warning(self, "Ошибка", 
                                          f"Не удалось сбросить статистику {service_name}")
                 else:
-                    # Если worker не активен, очищаем только файл активного сервиса
-                    try:
-                        if os.path.exists(stats_file):
-                            with open(stats_file, 'w') as f:
-                                json.dump({}, f)
-                            self.log_view.append_log(f"Статистика прослушиваний {service_name} успешно сброшена")
-                            QMessageBox.information(self, "Успех", 
-                                                 f"Статистика прослушиваний {service_name} успешно сброшена")
-                        else:
-                            self.log_view.append_log(f"Файл статистики {service_name} не найден")
-                            QMessageBox.information(self, "Информация", 
-                                                 f"Файл статистики {service_name} не найден")
-                    except Exception as e:
-                        QMessageBox.warning(self, "Ошибка", 
-                                         f"Не удалось сбросить статистику {service_name}: {str(e)}")
+                    # Если worker не активен, очищаем только файлы активных сервисов
+                    success = True
+                    for stats_file in stats_files:
+                        try:
+                            if os.path.exists(stats_file):
+                                with open(stats_file, 'w') as f:
+                                    json.dump({}, f)
+                                self.log_view.append_log(f"Статистика прослушиваний для {stats_file} успешно сброшена")
+                            else:
+                                self.log_view.append_log(f"Файл статистики {stats_file} не найден")
+                                success = False
+                        except Exception as e:
+                            self.log_view.append_log(f"Ошибка при сбросе статистики {stats_file}: {str(e)}")
+                            success = False
+                    
+                    if success:
+                        QMessageBox.information(self, "Успех", 
+                                             f"Статистика прослушиваний {service_name} успешно сброшена")
+                    else:
+                        QMessageBox.warning(self, "Предупреждение", 
+                                         "Некоторые файлы статистики не найдены или не удалось их сбросить")
                         
         except Exception as e:
             logger.error(f"Error resetting play statistics: {str(e)}")
@@ -294,46 +388,96 @@ class MainWindow(QMainWindow):
     def load_config(self):
         try:
             with open("settings.json", "r") as f:
-                return json.load(f)
+                config = json.load(f)
+                self.log_view.append_log(f"Loaded config: {config}")
+                if 'database_path' in config:
+                    self.log_view.append_log(f"Database path: {config['database_path']}")
+                    self.log_view.append_log(f"Path exists: {os.path.exists(config['database_path'])}")
+                return config
         except FileNotFoundError:
             logger.error("Settings file not found!")
+            return None
+        except Exception as e:
+            logger.error(f"Error loading config: {e}")
             return None
 
     @pyqtSlot()
     def on_start(self):
         try:
-            config = self.load_config()
-            if not config:
+            settings = self.load_config()
+            if not settings:
                 QMessageBox.warning(self, "Warning", "Please configure settings first!")
                 return
 
-            # Проверяем наличие файла базы данных
-            if not os.path.exists(config.get('database_path', '')):
-                QMessageBox.warning(self, "Warning", "Database file not found!")
+            # Проверяем наличие файла базы данных и выводим дополнительную информацию
+            database_path = settings.get('database_path', '')
+            self.log_view.append_log(f"Database path: {database_path}")
+            
+            if not os.path.exists(database_path):
+                self.log_view.append_log(f"Database file not found at: {database_path}")
+                QMessageBox.warning(self, "Warning", f"Database file not found at: {database_path}")
                 return
 
             # Создаем конфигурацию
-            worker_config = Config(
-                token=config['token'],
-                bluestacks_ip=config['bluestacks_ip'],
-                start_port=config['start_port'],
-                end_port=config['end_port'],
-                port_step=config['port_step'],
-                chat_id=config['chat_id'],
-                max_plays_per_track=config.get('max_plays_per_track', 5),
-                service_type=config.get('service_type', 'spotify')
-            )
+            worker_config = Config.from_dict(settings)
+            
+            # Еще раз проверяем наличие файла базы данных через Config
+            if not os.path.exists(worker_config.database_path):
+                self.log_view.append_log(f"Config database file not found: {worker_config.database_path}")
+                QMessageBox.warning(self, "Warning", f"Config database file not found: {worker_config.database_path}")
+                return
+
+            # # Создаем конфигурацию
+            # worker_config = Config(
+            #     token=config['token'],
+            #     bluestacks_ip=config['bluestacks_ip'],
+            #     start_port=config['start_port'],
+            #     end_port=config['end_port'],
+            #     port_step=config['port_step'],
+            #     chat_id=config['chat_id'],
+            #     max_plays_per_track=config.get('max_plays_per_track', 5),
+            #     service_type=config.get('service_type', 'spotify'),
+            #     mix_min_time=config.get('mix_min_time', 300),
+            #     mix_max_time=config.get('mix_max_time', 1800)
+            # # )
 
             # Создаем worker в зависимости от выбранного сервиса
-            if worker_config.service_type == 'spotify':
+            if worker_config.service_type == Config.SERVICE_MIX:
+                # Инициализируем разделенный вид устройств для Mix-режима
+                self.init_split_device_view()
+                
+                # Создаем MixWorker
+                self.worker = MixWorker(worker_config)
+                
+                # Подключаем сигналы
+                self.worker.progress_updated.connect(self.split_device_view.update_device_progress)
+                self.worker.service_switched.connect(self.split_device_view.update_device_service)
+                self.worker.log_message.connect(self.handle_log_message)
+                self.worker.task_completed.connect(self.on_task_completed)
+                
+            elif worker_config.service_type == 'spotify':
+                # Инициализируем стандартный вид устройств
+                self.init_device_view()
+                
+                # Создаем SpotifyWorker
                 self.worker = SpotifyWorker(worker_config)
-            else:
+                
+                # Подключаем сигналы
+                self.worker.progress_updated.connect(self.device_view.update_device_progress)
+                self.worker.log_message.connect(self.handle_log_message)
+                self.worker.task_completed.connect(self.on_task_completed)
+                
+            else:  # apple_music
+                # Инициализируем стандартный вид устройств
+                self.init_device_view()
+                
+                # Создаем AppleMusicWorker
                 self.worker = AppleMusicWorker(worker_config)
                 
-            # Подключаем сигналы
-            self.worker.progress_updated.connect(self.device_view.update_device_progress)
-            self.worker.log_message.connect(self.handle_log_message)
-            self.worker.task_completed.connect(self.on_task_completed)
+                # Подключаем сигналы
+                self.worker.progress_updated.connect(self.device_view.update_device_progress)
+                self.worker.log_message.connect(self.handle_log_message)
+                self.worker.task_completed.connect(self.on_task_completed)
             
             # Запускаем worker
             self.worker.start()
@@ -341,13 +485,11 @@ class MainWindow(QMainWindow):
             # Обновляем состояние UI
             self.start_button.setEnabled(False)
             self.stop_button.setEnabled(True)
-            logger.info("Automation started successfully")
+            logger.info(f"Automation started successfully with service type: {worker_config.service_type}")
 
         except Exception as e:
             logger.error(f"Failed to start automation: {str(e)}")
             QMessageBox.critical(self, "Error", f"Failed to start: {str(e)}")
-
-
 
     @pyqtSlot()
     def on_stop(self):
@@ -562,6 +704,18 @@ class MainWindow(QMainWindow):
         if settings_dialog.exec():
             self.log_view.append_log("Settings updated")
             logger.info("Settings updated")
+            
+            # Проверяем, не изменился ли тип сервиса
+            config = self.load_config()
+            if config:
+                # Если тип сервиса - mix, инициализируем разделенный вид
+                if config.get('service_type') == 'mix':
+                    if not self.split_device_view:
+                        self.init_split_device_view()
+                else:
+                    # Иначе инициализируем стандартный вид
+                    if not self.device_view:
+                        self.init_device_view()
 
 
     def closeEvent(self, event):
