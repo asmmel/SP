@@ -37,14 +37,30 @@ class DeviceState:
     def _load_track_plays(self):
         """Загрузка истории проигрываний для конкретного устройства"""
         try:
-            cache_file = 'data/spotify_track_plays.json'  # или apple_track_plays.json
+            # Проверяем наличие конфигурации
+            if not self.config:
+                # Используем значение по умолчанию или создаем временную конфигурацию
+                self.config = Config()  # Или другое значение по умолчанию
+                # Можно также залогировать это событие
+                logger.warning(f"No config for device {self.device_id}, using default")
+                
+            # Определяем сервис
+            service_type = getattr(self.config, 'service_type', 'spotify')  # Значение по умолчанию
+            
+            # Убеждаемся, что директория существует
+            os.makedirs('data', exist_ok=True)
+            
+            # Определяем путь к файлу кэша
+            cache_file = f'data/{service_type}_track_plays.json'
+            
             if os.path.exists(cache_file):
-                with open(cache_file, 'r') as f:
+                with open(cache_file, 'r', encoding='utf-8') as f:
                     all_devices_data = json.load(f)
-                    # Загружаем данные только для текущего устройства
                     self.track_plays = all_devices_data.get(self.device_id, {})
+                    logger.debug(f"Loaded track plays for {self.device_id}: {len(self.track_plays)} tracks")
             else:
                 self.track_plays = {}
+                logger.info(f"No track plays file found for {self.device_id}, starting fresh")
         except Exception as e:
             logger.error(f"Error loading track plays for device {self.device_id}: {str(e)}")
             self.track_plays = {}
@@ -224,8 +240,9 @@ class SpotifyAutomation:
         """Контекстный менеджер для обработки ошибок"""
         try:
             yield
-        except u2.exceptions.JsonRpcError as jre:
-            self._handle_error("JsonRpcError", jre, device, screenshot)
+        except Exception as e:
+            if 'JsonRpcError' in str(type(e)):
+                self._handle_error("JsonRpcError", device, screenshot)
         except u2.exceptions.XPathElementNotFoundError as xe:
             self._handle_error("XPathElementNotFoundError", xe, device, screenshot)
         except u2.exceptions.UiAutomationNotConnectedError as ue:
@@ -433,8 +450,9 @@ class SpotifyAutomation:
                 # Пытаемся найти и нажать на home_tab
                 d(resourceId="com.spotify.music:id/home_tab").click()
                 time.sleep(2)
-            except u2.exceptions.JsonRpcError as e:
-                logger.warning(f"Home tab not found: {str(e)}, trying alternative approach")
+            except Exception as e:
+                if 'JsonRpcError' in str(type(e)):
+                    logger.warning(f"Home tab not found: {str(e)}, trying alternative approach")
                 # Если не получилось найти home_tab, пробуем сразу перейти к поиску
                 pass
                 
@@ -557,7 +575,8 @@ class SpotifyAutomation:
             anr_texts = [
                 "Spotify isn't responding",
                 "isn't responding",
-                "Close app"
+                "Close app",
+                "DISMISS"
             ]
             
             for text in anr_texts:
@@ -575,6 +594,36 @@ class SpotifyAutomation:
         except Exception as e:
             logger.error(f"Error handling ANR dialog: {str(e)}")
             return False
+    
+
+    async def wait_for_search_results(self, d, timeout=15):
+        """
+        Ожидает загрузки результатов поиска в Spotify.
+        
+        Args:
+            d: Объект устройства uiautomator2
+            timeout: Максимальное время ожидания в секундах
+            
+        Returns:
+            bool: True если результаты загрузились, False если время ожидания истекло
+        """
+        start_time = time.time()
+        
+        # Минимальное время ожидания
+        min_wait = 3
+        
+        while time.time() - start_time < timeout:
+            # Проверяем наличие элементов с текстом "Song • ..."
+            results_exist = d(textMatches="Song • .*").exists
+            
+            # Если нашли результаты и прошло минимальное время
+            if results_exist and (time.time() - start_time >= min_wait):
+                return True
+            
+            # Ждем перед следующей проверкой
+            await asyncio.sleep(0.5)
+        
+        return False
 
     async def search_and_play(self, d, name_artist: str):
         """Поиск и воспроизведение трека"""
@@ -599,25 +648,25 @@ class SpotifyAutomation:
         d(resourceId="com.spotify.music:id/query").click()
         time.sleep(1)
         d.send_keys(name_artist)
-        time.sleep(2)
-
+        
+        # Получаем имя артиста для поиска
         artist_name = name_artist.split()[-1]
         search_text = f"Song • {artist_name}"
-        logger.info(f"Поиск: {search_text}")
-
+        
+        # Ожидание загрузки результатов поиска
+        await self.wait_for_search_results(d, timeout=15)
+        
+        # Ищем конкретный трек с именем артиста
         song_element = d(textMatches=f"Song • .*{re.escape(artist_name)}.*")
         if song_element.exists():
-            logger.info(f"Найдена песня: {song_element.get_text()}")
             song_element.click()
         else:
-            logger.info(f"Песня с '{artist_name}' не найдена. Выбор первого результата.")
+            # Выбираем первый результат, если конкретный трек не найден
             first_song = d(textMatches="Song • .*", instance=0)
             if first_song.exists:
-                logger.info(f"Найдена песня: {first_song.get_text()}")
                 first_song.click()
             else:
-                logger.info(f"Песни не найдены для {name_artist}")
-                # Добавляем в список ненайденных
+                # Если результаты не найдены вообще
                 self.tracks_not_found.append(name_artist)
                 d(resourceId="com.spotify.music:id/clear_query_button").click()
                 return

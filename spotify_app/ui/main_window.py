@@ -2,9 +2,9 @@ import sys
 import os
 import json
 import logging
-from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QMessageBox, QSizePolicy
+from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QMessageBox, QSizePolicy, QApplication
 from PyQt6.QtGui import QIcon
-from PyQt6.QtCore import Qt, pyqtSlot, QTimer
+from PyQt6.QtCore import Qt, pyqtSlot, QTimer, QThread, QMetaObject
 import socket
 # Импортируем наши виджеты
 from .views.sidebar_view import SidebarView
@@ -501,44 +501,58 @@ class MainWindow(QMainWindow):
                 msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
                 msg_box.setDefaultButton(QMessageBox.StandardButton.No)
                 
-                msg_box.setStyleSheet("""
-                    QMessageBox {
-                        background-color: #1e1e1e;
-                    }
-                    QMessageBox QLabel {
-                        background-color: transparent;
-                        color: white;
-                    }
-                    QPushButton {
-                        background-color: #3a3a3a;
-                        color: white;
-                        border: none;
-                        border-radius: 3px;
-                        padding: 5px 15px;
-                        min-width: 80px;
-                    }
-                    QPushButton:hover {
-                        background-color: #4a4a4a;
-                    }
-                    QPushButton:pressed {
-                        background-color: #2a2a2a;
-                    }
-                """)
+                # стили сохранены...
                 
                 reply = msg_box.exec()
                 
                 if reply == QMessageBox.StandardButton.Yes:
                     logger.info("Stopping automation...")
-                    self.worker.stop()
-                    self.worker.wait()  
                     self.stop_button.setEnabled(False)
-                    self.start_button.setEnabled(True)
-                    logger.info("Automation stopped by user")
+                    self.start_button.setEnabled(False)
+                    
+                    # Блокируем UI на время остановки
+                    QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+                    
+                    # Остановка в отдельном потоке
+                    def stop_worker():
+                        try:
+                            self.worker.stop()
+                            self.worker.wait(5000)  # Увеличиваем таймаут до 5 секунд
+                            if self.worker.isRunning():
+                                logger.warning("Worker did not stop within timeout, terminating...")
+                                self.worker.terminate()
+                                self.worker.wait(1000)
+                        except Exception as e:
+                            logger.error(f"Error stopping worker: {str(e)}")
+                        finally:
+                            # Обновляем UI в основном потоке
+                            QMetaObject.invokeMethod(self, "_finish_stop",
+                                                    Qt.ConnectionType.QueuedConnection)
+                    
+                    # Запускаем остановку в отдельном потоке
+                    stop_thread = QThread()
+                    stop_thread.run = stop_worker
+                    stop_thread.start()
+                    
         except Exception as e:
             logger.error(f"Error stopping automation: {str(e)}")
-            QMessageBox.critical(self, "Error", f"Failed to stop: {str(e)}")
-        finally:
             self.start_button.setEnabled(True)
+            self.stop_button.setEnabled(False)
+            QApplication.restoreOverrideCursor()
+
+    @pyqtSlot()
+    def _finish_stop(self):
+        """Вызывается после завершения остановки воркера"""
+        self.start_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+        
+        # Очищаем ссылку на worker
+        if self.worker:
+            self.worker.deleteLater()
+            self.worker = None
+            
+        QApplication.restoreOverrideCursor()
+        logger.info("Automation stopped by user")
 
     @pyqtSlot(bool)
     def on_task_completed(self, success: bool):

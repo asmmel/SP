@@ -66,12 +66,22 @@ class MixWorker(QThread):
         root_logger.setLevel(logging.INFO)
     
     def stop(self):
-        """Остановка рабочего потока"""
         try:
             self.log_message.emit("INFO", "Останавливаем Mix Worker...")
             self.running = False
             
-            # Останавливаем оба автоматизатора
+            # Закрыть все подключения uiautomator2
+            for device_id, device in self.device_connections.items():
+                try:
+                    device.service("uiautomator").stop()
+                    device.watchers.remove()
+                    del device
+                except Exception as e:
+                    self.log_message.emit("ERROR", f"Ошибка закрытия соединения {device_id}: {str(e)}")
+            
+            self.device_connections.clear()
+            
+            # Остановка автоматизаторов
             if self.spotify_automation:
                 try:
                     self.spotify_automation.stop()
@@ -84,12 +94,11 @@ class MixWorker(QThread):
                 except Exception as e:
                     self.log_message.emit("ERROR", f"Ошибка остановки Apple Music: {str(e)}")
             
-            # Ждем завершения текущих операций
-            if self.isRunning():
-                self.wait(5000)  # 5 секунд таймаут
+            # Освобождение памяти
+            self.spotify_automation = None
+            self.apple_music_automation = None
             
             self.log_message.emit("INFO", "Mix Worker остановлен")
-            
         except Exception as e:
             self.log_message.emit("ERROR", f"Ошибка в процессе остановки: {str(e)}")
     

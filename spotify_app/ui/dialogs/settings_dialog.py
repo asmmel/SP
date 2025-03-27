@@ -332,6 +332,16 @@ class SettingsDialog(QDialog):
             pass
 
     def save_settings(self):
+        # Проверяем корректность времени для Mix режима
+        if self.mix_radio.isChecked():
+            min_time = self.mix_min_time.value()
+            max_time = self.mix_max_time.value()
+            
+            if min_time >= max_time:
+                QMessageBox.warning(self, "Ошибка настроек", 
+                                "Минимальное время должно быть меньше максимального")
+                return
+        
         # Определяем тип сервиса на основе выбранной радиокнопки
         if self.spotify_radio.isChecked():
             service_type = "spotify"

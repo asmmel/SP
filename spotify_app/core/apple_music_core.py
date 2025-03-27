@@ -35,8 +35,22 @@ class DeviceState:
     def _load_track_plays(self):
         """Загрузка истории проигрываний для конкретного устройства"""
         try:
+            # Проверяем наличие конфигурации
+            if not self.config:
+                # Используем значение по умолчанию или создаем временную конфигурацию
+                self.config = Config()  # Или другое значение по умолчанию
+                # Можно также залогировать это событие
+                logger.warning(f"No config for device {self.device_id}, using default")
+                
+            # Определяем сервис
+            service_type = getattr(self.config, 'service_type', 'spotify')  # Значение по умолчанию
+            
+            # Убеждаемся, что директория существует
             os.makedirs('data', exist_ok=True)
-            cache_file = f'data/{self.config.service_type}_track_plays.json'
+            
+            # Определяем путь к файлу кэша
+            cache_file = f'data/{service_type}_track_plays.json'
+            
             if os.path.exists(cache_file):
                 with open(cache_file, 'r', encoding='utf-8') as f:
                     all_devices_data = json.load(f)
@@ -48,7 +62,7 @@ class DeviceState:
         except Exception as e:
             logger.error(f"Error loading track plays for device {self.device_id}: {str(e)}")
             self.track_plays = {}
-    
+            
     def _save_track_plays(self):
         """Сохранение истории проигрываний для конкретного устройства"""
         try:
@@ -201,8 +215,9 @@ class AppleMusicAutomation:
         """Контекстный менеджер для обработки ошибок"""
         try:
             yield
-        except u2.exceptions.JsonRpcError as jre:
-            self._handle_error("JsonRpcError", jre, device, True)
+        except Exception as e:
+            if 'JsonRpcError' in str(type(e)):
+                self._handle_error("JsonRpcError", device, True)
         except u2.exceptions.UiAutomationNotConnectedError as ue:
             self._handle_error("UiAutomationNotConnectedError", ue, device, False)
         except Exception as ex:
@@ -290,10 +305,54 @@ class AppleMusicAutomation:
             search_button.click()
             time.sleep(1)
             d.send_keys(name_artist)
-            time.sleep(3)
-                    
-            d.press('enter')
-            time.sleep(4)
+            
+            # Ожидание результатов поиска
+            search_results_loaded = False
+            timeout = 15  # секунд на ожидание
+            start_time = time.time()
+            
+            # Ждем появления результатов в списке
+            while time.time() - start_time < timeout:
+                results_view = d(resourceId="com.apple.android.music:id/search_results_recyclerview")
+                if results_view.exists and results_view.child(className="android.view.ViewGroup").exists:
+                    search_results_loaded = True
+                    logger.info("Результаты поиска загружены")
+                    break
+                # Проверяем индикатор загрузки, если он есть
+                if d(resourceId="com.apple.android.music:id/progress_bar").exists:
+                    logger.debug("Идет загрузка результатов...")
+                await asyncio.sleep(0.5)
+            
+            # Если результаты не загрузились за отведенное время, или пустые
+            if not search_results_loaded:
+                logger.warning(f"Результаты поиска не загрузились за {timeout} секунд")
+                d.press('enter')  # Все равно пробуем нажать Enter
+                time.sleep(2)
+            else:
+                # Результаты загрузились, нажимаем Enter для продолжения поиска
+                d.press('enter')
+                time.sleep(2)
+                
+            # Ждем загрузки окончательных результатов после нажатия Enter
+            final_results_loaded = False
+            start_time = time.time()
+            
+            while time.time() - start_time < timeout:
+                results_view = d(resourceId="com.apple.android.music:id/search_results_recyclerview")
+                if results_view.exists and results_view.child(className="android.view.ViewGroup").exists:
+                    final_results_loaded = True
+                    logger.info("Финальные результаты поиска загружены")
+                    break
+                await asyncio.sleep(0.5)
+                
+            if not final_results_loaded:
+                logger.warning("Финальные результаты поиска не загрузились")
+                # Добавляем в список ненайденных
+                self.artists_not_found.append(name_artist)
+                # Пытаемся закрыть поиск
+                if d(resourceId="com.apple.android.music:id/search_close_btn").exists:
+                    d(resourceId="com.apple.android.music:id/search_close_btn").click()
+                return
 
             name_track = d.xpath('//*[@resource-id="com.apple.android.music:id/search_results_recyclerview"]/android.view.ViewGroup[1]')
             if name_track.exists:
