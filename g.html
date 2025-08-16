@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smoothie Evolution: Premium Program</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Montserrat:wght@300;400;500;600&family=Lato:wght@300;400;700&display=swap');
+        
+        /* A4 size setup */
+        body {
+            width: 210mm;
+            height: 297mm;
+            margin: 0 auto;
+            padding: 20mm;
+            box-sizing: border-box;
+            font-family: 'Lato', sans-serif;
+            color: #2D2D2D;
+            line-height: 1.6;
+            background-color: #FFFFFF;
+            font-size: 11pt;
+        }
+        
+        /* Color scheme */
+        :root {
+            --heading-primary: #14574D;
+            --heading-secondary: #0F766E;
+            --heading-tertiary: #0D4439;
+            --accent-gold: #C49B63;
+            --text-primary: #2D2D2D;
+            --text-secondary: #4A4A4A;
+            --text-notes: #6D6D6D;
+            --accent-transformation: #873145;
+            --accent-vitality: #C49B63;
+            --accent-renewal: #6A4C93;
+            --bg-primary: #FFFFFF;
+            --bg-secondary: #F7F7F7;
+            --bg-highlight: #F6F2E9;
+            --bg-dark: #121B1B;
+        }
+        
+        /* Typography */
+        h1, h2, h3, h4 {
+            font-family: 'Playfair Display', serif;
+            margin-top: 1.5em;
+            margin-bottom: 0.5em;
+            line-height: 1.2;
+        }
+        
+        h1 {
+            color: var(--heading-primary);
+            font-size: 24pt;
+            font-weight: 700;
+            text-align: center;
+            margin-top: 0;
+        }
+        
+        h2 {
+            color: var(--heading-secondary);
+            font-size: 18pt;
+            font-weight: 600;
+            border-bottom: 1px solid var(--accent-gold);
+            padding-bottom: 0.2em;
+        }
+        
+        h3 {
+            color: var(--heading-tertiary);
+            font-size: 14pt;
+            font-weight: 500;
+        }
+        
+        h4 {
+            color: var(--accent-gold);
+            font-size: 12pt;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        p {
+            margin-bottom: 0.8em;
+        }
+        
+        em {
+            font-style: italic;
+        }
+        
+        strong {
+            font-weight: 700;
+        }
+        
+        /* Layout elements */
+        .page {
+            page-break-after: always;
+            position: relative;
+            height: 257mm; /* A4 height minus padding */
+        }
+        
+        .page-content {
+            height: 100%;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 2em;
+        }
+        
+        .footer {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            text-align: center;
+            font-size: 9pt;
+            color: var(--text-notes);
+            border-top: 1px solid var(--accent-gold);
+            padding-top: 0.5em;
+        }
+        
+        /* Specific elements */
+        .subtitle {
+            font-family: 'Montserrat', sans-serif;
+            font-size: 14pt;
+            color: var(--text-secondary);
+            text-align: center;
+            margin-top: -0.5em;
+            margin-bottom: 2em;
+        }
+        
+        .tagline {
+            font-family: 'Montserrat', sans-serif;
+            font-size: 12pt;
+            letter-spacing: 3px;
+            text-align: center;
+            color: var(--accent-gold);
+            margin: 2em 0;
+        }
+        
+        .section {
+            margin-bottom: 2em;
+        }
+        
+        .image-placeholder {
+            background-color: var(--bg-secondary);
+            border: 1px solid #ddd;
+            height: 150px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 1em 0;
+            font-style: italic;
+            color: var(--text-notes);
+        }
+        
+        .ingredient-list {
+            list-style-type: none;
+            padding-left: 0;
+        }
+        
+        .ingredient-list li {
+            margin-bottom: 0.3em;
+            padding-left: 1em;
+            position: relative;
+        }
+        
+        .ingredient-list li:before {
+            content: "•";
+            position: absolute;
+            left: 0;
+            color: var(--accent-gold);
+        }
+        
+        .method {
+            font-style: italic;
+            color: var(--text-secondary);
+            margin-top: 1em;
+        }
+        
+        .pathway-title {
+            font-family: 'Montserrat', sans-serif;
+            font-weight: 600;
+            color: white;
+            padding: 0.5em 1em;
+            display: inline-block;
+            margin-bottom: 1em;
+        }
+        
+        .transformation {
+            background-color: var(--accent-transformation);
+        }
+        
+        .vitality {
+            background-color: var(--accent-vitality);
+        }
+        
+        .renewal {
+            background-color: var(--accent-renewal);
+        }
+        
+        .smoothie-name {
+            color: var(--heading-tertiary);
+            font-weight: 700;
+            margin-top: 1.5em;
+        }
+        
+        .two-column {
+            display: flex;
+            justify-content: space-between;
+            gap: 2em;
+        }
+        
+        .column {
+            flex: 1;
+        }
+        
+        .highlight-box {
+            background-color: var(--bg-highlight);
+            padding: 1.5em;
+            border-left: 3px solid var(--accent-gold);
+            margin: 1.5em 0;
+        }
+        
+        .note {
+            font-size: 9pt;
+            color: var(--text-notes);
+            font-style: italic;
+        }
+        
+        /* Page numbers */
+        .page-number {
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            font-size: 9pt;
+            color: var(--text-notes);
+        }
+        
+        .page-number:before {
+            content: "Page ";
+        }
+    </style>
+</head>
+<body>
+
+<!-- Page 1: Cover Page -->
+<div class="page">
+    <div class="page-content">
+        <header class="header">
+            <h1>SMOOTHIE EVOLUTION</h1>
+            <div class="subtitle">PREMIUM PROGRAM</div>
+        </header>
+        
+        <div class="image-placeholder">
+            [Luxury studio photography of an elegant smoothie in a premium crystal glass on a minimalist marble surface]
+        </div>
+        
+        <div class="tagline">SCIENCE • LUXURY • TRANSFORMATION</div>
+        
+        <footer class="footer">
+            © Smoothie Evolution. All rights reserved.
+        </footer>
+    </div>
+    <div class="page-number">1</div>
+</div>
+
+<!-- Page 2: Introduction -->
+<div class="page">
+    <div class="page-content">
+        <h2>EVOLUTION OF WELLNESS</h2>
+        
+        <p><em>Welcome to the next generation of nutritional transformation. Smoothie Evolution represents our commitment to excellence in wellness, bringing together cutting-edge nutritional science and luxurious simplicity. This program transcends ordinary diet plans—it's a comprehensive approach to cellular rejuvenation, metabolic enhancement, and holistic vitality.</em></p>
+        
+        <p><em>As an evolution from our original program, this premium system incorporates advanced principles of chronobiology, phytonutrient synergy, and precision nutrition. Whether you're continuing your wellness journey or beginning anew, Smoothie Evolution offers an elevated path to your optimal self.</em></p>
+        
+        <p><em>Within these pages, you'll discover not merely recipes, but carefully calibrated nutritional compositions designed to transform your relationship with food, energy, and vitality.</em></p>
+        
+        <div class="image-placeholder">
+            [Luxury lifestyle image showing a sophisticated home setting with premium blender and elegant ingredients]
+        </div>
+        
+        <footer class="footer">
+            Smoothie Evolution: Premium Program
+        </footer>
+    </div>
+    <div class="page-number">2</div>
+</div>
+
+<!-- Page 3: Program Philosophy -->
+<div class="page">
+    <div class="page-content">
+        <h2>THE EVOLUTION PHILOSOPHY</h2>
+        
+        <p><em>Smoothie Evolution stands on three foundational pillars that distinguish our premium approach:</em></p>
+        
+        <h3>PRECISION NUTRITION</h3>
+        <p><em>Each formulation is scientifically calibrated for optimal nutrient density and bioavailability, ensuring maximum cellular utilization of every ingredient.</em></p>
+        
+        <h3>ADAPTIVE PERSONALIZATION</h3>
+        <p><em>Unlike conventional one-size approaches, our program offers three distinct nutritional pathways tailored to your specific wellness objectives and metabolic profile.</em></p>
+        
+        <h3>LUXURY OF SIMPLICITY</h3>
+        <p><em>True luxury lies in refined simplicity. Our program eliminates complexity while elevating quality, allowing you to experience wellness as it should be—effortless and exceptional.</em></p>
+        
+        <p><em>The Evolution difference lies not just in what we include, but in our meticulous curation of ingredients, proportions, and sequences designed to work in harmony with your body's natural rhythms.</em></p>
+        
+        <div class="image-placeholder">
+            [Abstract luxury representation of three pillars concept. Minimal composition with three elegant marble columns]
+        </div>
+        
+        <footer class="footer">
+            Smoothie Evolution: Premium Program
+        </footer>
+    </div>
+    <div class="page-number">3</div>
+</div>
+
+<!-- Page 4: Your Evolution Pathway -->
+<div class="page">
+    <div class="page-content">
+        <h2>SELECTING YOUR EVOLUTION PATHWAY</h2>
+        
+        <p><em>Smoothie Evolution offers three distinct nutritional journeys, each precisely calibrated for specific wellness objectives:</em></p>
+        
+        <h3>TRANSFORMATION PATHWAY</h3>
+        <p><em>Focused on metabolic optimization and body composition refinement. Ideal for those seeking physical transformation through strategic nutrient timing and anti-inflammatory ingredients.</em></p>
+        
+        <h3>VITALITY PATHWAY</h3>
+        <p><em>Engineered to maximize cellular energy production and cognitive performance. Perfect for high-performers seeking sustained energy, mental clarity, and enhanced productivity.</em></p>
+        
+        <h3>RENEWAL PATHWAY</h3>
+        <p><em>Centered on cellular detoxification and systemic rejuvenation. Designed for those prioritizing longevity, internal cleansing, and restoration of optimal physiological function.</em></p>
+        
+        <h4>PATHWAY SELECTOR</h4>
+        
+        <p><em>Consider these questions to identify your optimal pathway:</em></p>
+        <ul class="ingredient-list">
+            <li>What is your primary wellness objective at this moment?</li>
+            <li>How would you describe your current energy patterns throughout the day?</li>
+            <li>Which area of wellbeing deserves your immediate attention?</li>
+        </ul>
+        
+        <div class="image-placeholder">
+            [Luxury infographic showing three distinct pathways represented by elegant flowing lines in gold, platinum, and copper tones]
+        </div>
+        
+        <footer class="footer">
+            Smoothie Evolution: Premium Program
+        </footer>
+    </div>
+    <div class="page-number">4</div>
+</div>
+
+<!-- Page 5: Quick Start Guide -->
+<div class="page">
+    <div class="page-content">
+        <h2>THE EVOLUTION PROTOCOL: QUICK START</h2>
+        
+        <h3>PREPARATION PHASE (Days 1-2)</h3>
+        <ol>
+            <li><em>Acquire your premium ingredients (see Curated Shopping Guide)</em></li>
+            <li><em>Prepare your wellness space with essential equipment</em></li>
+            <li><em>Begin hydration protocol (structured water with minerals)</em></li>
+        </ol>
+        
+        <h3>INTEGRATION PHASE (Days 3-7)</h3>
+        <ol>
+            <li><em>Morning: Evolution smoothie on empty stomach</em></li>
+            <li><em>Midday: Whole foods meal following provided guidelines</em></li>
+            <li><em>Evening: Second Evolution smoothie 3 hours before sleep</em></li>
+        </ol>
+        
+        <h3>ADVANCEMENT PHASE (Days 8-14)</h3>
+        <ol>
+            <li><em>Implement optional intermittent consumption window (8-hour period)</em></li>
+            <li><em>Introduce advanced smoothie formulations</em></li>
+            <li><em>Begin tracking transformation metrics</em></li>
+        </ol>
+        
+        <h4>14-DAY VISUAL TIMELINE</h4>
+        <div class="image-placeholder">
+            [Luxury timeline infographic designed like a premium watch face with 14 segments in rose gold against black background]
+        </div>
+        
+        <footer class="footer">
+            Smoothie Evolution: Premium Program
+        </footer>
+    </div>
+    <div class="page-number">5</div>
+</div>
+
+<!-- Page 6: Core Formulations - Transformation Pathway -->
+<div class="page">
+    <div class="page-content">
+        <h2>TRANSFORMATION PATHWAY: PREMIUM FORMULATIONS</h2>
+        
+        <div class="pathway-title transformation">TRANSFORMATION PATHWAY</div>
+        
+        <p class="smoothie-name">EMERALD RESTORATION</p>
+        <p><em>A deeply restorative blend designed to optimize metabolic function and enhance natural detoxification pathways.</em></p>
+        
+        <p><strong>Ingredients:</strong></p>
+        <ul class="ingredient-list">
+            <li>1 cup filtered glacier water</li>
+            <li>1 cup organic baby spinach</li>
+            <li>½ organic avocado</li>
+            <li>½ organic cucumber</li>
+            <li>1 tablespoon cold-pressed MCT oil</li>
+            <li>1 tablespoon organic hemp seeds</li>
+            <li>¼ teaspoon Himalayan sea salt</li>
+            <li>1 teaspoon matcha powder</li>
+            <li>Juice of ½ organic lemon</li>
+            <li>3 ice cubes (filtered water)</li>
+        </ul>
+        
+        <p class="method"><em>Method: Blend on high power for 45 seconds until silky smooth consistency is achieved.</em></p>
+        
+        <p class="smoothie-name">RUBY METABOLIC ACTIVATOR</p>
+        <p><em>Engineered to stimulate thermogenesis and enhance metabolic efficiency throughout the day.</em></p>
+        
+        <p><strong>Ingredients:</strong></p>
+        <ul class="ingredient-list">
+            <li>1 cup unsweetened almond milk</li>
+            <li>1 cup organic mixed berries (blackberry, raspberry, blueberry)</li>
+            <li>1 tablespoon raw almond butter</li>
+            <li>1 tablespoon ground flaxseeds</li>
+            <li>¼ teaspoon ceylon cinnamon</li>
+            <li>1 teaspoon raw cacao nibs</li>
+            <li>1 scoop high-quality collagen peptides (optional)</li>
+            <li>5 fresh mint leaves</li>
+            <li>Stevia extract to taste (optional)</li>
+        </ul>
+        
+        <p class="method"><em>Method: Blend on high power for 60 seconds to ensure optimal texture and nutrient extraction.</em></p>
+        
+        <div class="image-placeholder">
+            [Ultra-premium food photography diptych of two luxury smoothies in crystal glasses]
+        </div>
+        
+        <footer class="footer">
+            Smoothie Evolution: Premium Program
+        </footer>
+    </div>
+    <div class="page-number">6</div>
+</div>
+
+<!-- Page 7: Core Formulations - Vitality Pathway -->
+<div class="page">
+    <div class="page-content">
+        <h2>VITALITY PATHWAY: PREMIUM FORMULATIONS</h2>
+        
+        <div class="pathway-title vitality">VITALITY PATHWAY</div>
+        
+        <p class="smoothie-name">GOLDEN COGNITIVE ENHANCER</p>
+        <p><em>A precision-crafted blend designed to optimize mental clarity, focus, and sustained cognitive performance.</em></p>
+        
+        <p><strong>Ingredients:</strong></p>
+        <ul class="ingredient-list">
+            <li>1 cup ceremonial-grade coconut water</li>
+            <li>1 tablespoon cold-pressed olive oil</li>
+            <li>½ cup organic mango chunks</li>
+            <li>¼ cup organic pineapple</li>
+            <li>1 tablespoon raw walnuts</li>
+            <li>1 teaspoon turmeric root (freshly grated)</li>
+            <li>¼ teaspoon black pepper</li>
+            <li>½ inch fresh ginger (peeled)</li>
+            <li>1 teaspoon bee pollen</li>
+            <li>1 teaspoon lion's mane mushroom powder</li>
+            <li>Small handful of baby spinach</li>
+        </ul>
+        
+        <p class="method"><em>Method: Blend at high velocity for 50 seconds to ensure optimal emulsification of oils and complete extraction of bioactive compounds.</em></p>
+        
+        <p class="smoothie-name">AZURE PERFORMANCE ELIXIR</p>
+        <p><em>Formulated to enhance cellular energy production and optimize physical performance through strategic nutrient timing.</em></p>
+        
+        <p><strong>Ingredients:</strong></p>
+        <ul class="ingredient-list">
+            <li>1 cup unsweetened almond milk</li>
+            <li>½ frozen banana</li>
+            <li>½ cup organic blueberries</li>
+            <li>1 tablespoon almond butter</li>
+            <li>1 tablespoon chia seeds</li>
+            <li>1 teaspoon maca powder</li>
+            <li>1 teaspoon spirulina</li>
+            <li>½ teaspoon vanilla bean powder</li>
+            <li>1 teaspoon cordyceps mushroom powder</li>
+            <li>Small handful of kale</li>
+            <li>1 Medjool date (optional)</li>
+        </ul>
+        
+        <p class="method"><em>Method: Blend on progressive power, starting low and increasing to maximum for 60 seconds total blending time.</em></p>
+        
+        <div class="image-placeholder">
+            [Luxury food photography diptych of premium functional smoothies in crystal tumblers]
+        </div>
+        
+        <footer class="footer">
+            Smoothie Evolution: Premium Program
+        </footer>
+    </div>
+    <div class="page-number">7</div>
+</div>
+
+<!-- Page 8: Core Formulations - Renewal Pathway -->
+<div class="page">
+    <div class="page-content">
+        <h2>RENEWAL PATHWAY: PREMIUM FORMULATIONS</h2>
+        
+        <div class="pathway-title renewal">RENEWAL PATHWAY</div>
+        
+        <p class="smoothie-name">AMETHYST CELLULAR RENEWAL</p>
+        <p><em>A sophisticated blend designed to activate cellular detoxification pathways and support systemic renewal.</em></p>
+        
+        <p><strong>Ingredients:</strong></p>
+        <ul class="ingredient-list">
+            <li>1 cup filtered spring water</li>
+            <li>1 cup organic red cabbage</li>
+            <li>½ cup frozen organic blueberries</li>
+            <li>½ cup frozen blackberries</li>
+            <li>1 tablespoon cold-pressed flaxseed oil</li>
+            <li>1 tablespoon activated charcoal</li>
+            <li>1 tablespoon ground flaxseeds</li>
+            <li>1 teaspoon milk thistle extract</li>
+            <li>½ lemon, juiced</li>
+            <li>Small piece fresh ginger</li>
+        </ul>
+        
+        <p class="method"><em>Method: Blend at ascending speeds, beginning gently and progressing to maximum power for a total of 70 seconds.</em></p>
+        
+        <p class="smoothie-name">JADE REJUVENATION COMPLEX</p>
+        <p><em>Meticulously formulated to support liver function and enhance the body's natural elimination processes.</em></p>
+        
+        <p><strong>Ingredients:</strong></p>
+        <ul class="ingredient-list">
+            <li>1 cup coconut water</li>
+            <li>1 cup organic dandelion greens</li>
+            <li>½ cup organic cucumber</li>
+            <li>½ green apple</li>
+            <li>1 stalk organic celery</li>
+            <li>1 tablespoon cold-pressed extra virgin olive oil</li>
+            <li>1 tablespoon hemp seeds</li>
+            <li>1 teaspoon chlorella powder</li>
+            <li>½ inch fresh ginger root</li>
+            <li>Small handful fresh cilantro</li>
+            <li>Pinch of Himalayan salt</li>
+        </ul>
+        
+        <p class="method"><em>Method: Blend progressively for 60 seconds, ensuring complete integration of ingredients without excessive oxidation.</em></p>
+        
+        <div class="image-placeholder">
+            [Ultra-premium beverage photography diptych of luxury detox smoothies in crystal vessels]
+        </div>
+        
+        <footer class="footer">
+            Smoothie Evolution: Premium Program
+        </footer>
+    </div>
+    <div class="page-number">8</div>
+</div>
+
+<!-- Page 9: Curated Shopping List -->
+<div class="page">
+    <div class="page-content">
+        <h2>EVOLUTION CURATED INGREDIENT COLLECTION</h2>
+        
+        <div class="two-column">
+            <div class="column">
+                <h3>FOUNDATION ELEMENTS</h3>
+                <p><em>(Required for all pathways)</em></p>
+                <ul class="ingredient-list">
+                    <li>Filtered spring water or alkaline water</li>
+                    <li>Organic coconut water (cold-pressed, not from concentrate)</li>
+                    <li>Unsweetened almond milk (preferably homemade or premium brand)</li>
+                    <li>Organic spinach (baby preferred)</li>
+                    <li>Organic kale (lacinato/dinosaur variety)</li>
+                    <li>Organic cucumber</li>
+                    <li>Organic avocado</li>
+                    <li>Organic lemons and limes</li>
+                    <li>Premium sea salt (Himalayan or Celtic)</li>
+                    <li>Organic flaxseeds (whole, to be freshly ground)</li>
+                    <li>Organic hemp seeds</li>
+                    <li>Cold-pressed MCT oil or coconut oil</li>
+                    <li>Raw honey (manuka, if possible) or liquid stevia</li>
+                </ul>
+                
+                <h3>TRANSFORMATION PATHWAY ADDITIONS</h3>
+                <ul class="ingredient-list">
+                    <li>Mixed organic berries (fresh or flash-frozen)</li>
+                    <li>Organic cacao nibs and powder</li>
+                    <li>Ceylon cinnamon</li>
+                    <li>Premium collagen peptides (grass-fed)</li>
+                    <li>Organic matcha powder (ceremonial grade)</li>
+                    <li>Organic almond butter (raw, stone-ground)</li>
+                </ul>
+            </div>
+            
+            <div class="column">
+                <h3>VITALITY PATHWAY ADDITIONS</h3>
+                <ul class="ingredient-list">
+                    <li>Organic mango and pineapple</li>
+                    <li>Raw walnuts</li>
+                    <li>Fresh turmeric root</li>
+                    <li>Organic ginger root</li>
+                    <li>Bee pollen (local, if possible)</li>
+                    <li>Functional mushrooms (lion's mane, cordyceps)</li>
+                    <li>Organic maca powder</li>
+                    <li>Premium spirulina (glass-packaged)</li>
+                    <li>Vanilla bean powder</li>
+                </ul>
+                
+                <h3>RENEWAL PATHWAY ADDITIONS</h3>
+                <ul class="ingredient-list">
+                    <li>Organic red cabbage</li>
+                    <li>Organic dandelion greens</li>
+                    <li>Organic blackberries</li>
+                    <li>Activated charcoal (food grade)</li>
+                    <li>Milk thistle extract</li>
+                    <li>Organic chlorella powder</li>
+                    <li>Fresh cilantro</li>
+                    <li>Cold-pressed extra virgin olive oil</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="image-placeholder">
+            [Luxury flat lay photography of premium organic ingredients arranged by color in gradient pattern]
+        </div>
+        
+        <footer class="footer">
+            Smoothie Evolution: Premium Program
+        </footer>
+    </div>
+    <div class="page-number">9</div>
+</div>
+
+<!-- Page 10: Substitution Matrix -->
+<div class="page">
+    <div class="page-content">
+        <h2>PREMIUM SUBSTITUTION MATRIX</h2>
+        
+        <p><em>Our Evolution Program acknowledges the importance of adaptation and personalization. This curated substitution matrix allows for thoughtful modifications while maintaining the integrity of each formulation.</em></p>
+        
+        <div class="highlight-box">
+            <h4>PREMIUM LIQUID BASES</h4>
+            <p>Alkaline Water → Structured Water → Spring Water</p>
+            <p>Coconut Water → Watermelon Water → Aloe Water</p>
+            <p>Almond Milk → Cashew Milk → Macadamia Milk</p>
+            
+            <h4>GREENS FOUNDATION</h4>
+            <p>Spinach → Swiss Chard → Collard Greens</p>
+            <p>Kale → Dandelion Greens → Arugula</p>
+            <p>Cucumber → Celery → Zucchini</p>
+            
+            <h4>TRANSFORMATION ELEMENTS</h4>
+            <p>Avocado → Coconut Meat → Macadamia Nuts</p>
+            <p>Berries → Tart Cherry → Pomegranate</p>
+            <p>Matcha → Moringa → Wheatgrass</p>
+            
+            <h4>VITALITY ELEMENTS</h4>
+            <p>Mango → Papaya → Golden Kiwi</p>
+            <p>Turmeric → Ginger → Galangal</p>
+            <p>Lion's Mane → Cordyceps → Reishi</p>
+            
+            <h4>RENEWAL ELEMENTS</h4>
+            <p>Red Cabbage → Purple Kale → Beet Greens</p>
+            <p>Blueberries → Blackberries → Black Currants</p>
+            <p>Chlorella → Spirulina → Blue Majik</p>
+        </div>
+        
+        <p><strong>ADAPTATION NOTES:</strong></p>
+        <p><em>When substituting, consider not only flavor profiles but functional properties. The matrix is arranged to maintain similar phytonutrient profiles and therapeutic actions while accommodating preferences and seasonal availability.</em></p>
+        
+        <div class="image-placeholder">
+            [Luxury infographic showing elegant substitution matrix in premium design format]
+        </div>
+        
+        <footer class="footer">
+            Smoothie Evolution: Premium Program
+        </footer>
+    </div>
+    <div class="page-number">10</div>
+</div>
+
+<!-- Page 11: Pathway Extensions -->
+<div class="page">
+    <div class="page-content">
+        <h2>EVOLUTION PATHWAY EXTENSIONS</h2>
+        
+        <p><em>While the 14-day Evolution Program offers comprehensive transformation, these curated extensions provide options for continued advancement of your wellness journey.</em></p>
+        
+        <h3>TRANSFORMATION PATHWAY: 30-DAY EXTENSION</h3>
+        <ul class="ingredient-list">
+            <li><em>Weeks 3-4:</em> Introduction of strategic 16:8 consumption window</li>
+            <li><em>Weeks 5-6:</em> Integration of targeted fasting-mimicking formulations</li>
+            <li><em>Advanced Metrics:</em> Body composition analysis beyond weight measurement</li>
+            <li><em>Evolution Outcome:</em> Optimized metabolic flexibility and enhanced fat utilization</li>
+        </ul>
+        
+        <h3>VITALITY PATHWAY: 30-DAY EXTENSION</h3>
+        <ul class="ingredient-list">
+            <li><em>Weeks 3-4:</em> Incorporation of nootropic-enhanced formulations</li>
+            <li><em>Weeks 5-6:</em> Addition of adaptogenic cycling protocol</li>
+            <li><em>Advanced Metrics:</em> Cognitive performance assessment and HRV monitoring</li>
+            <li><em>Evolution Outcome:</em> Sustained high performance with improved recovery metrics</li>
+        </ul>
+        
+        <h3>RENEWAL PATHWAY: 30-DAY EXTENSION</h3>
+        <ul class="ingredient-list">
+            <li><em>Weeks 3-4:</em> Introduction of systematic organ-support protocol</li>
+            <li><em>Weeks 5-6:</em> Implementation of cellular autophagy stimulation</li>
+            <li><em>Advanced Metrics:</em> Inflammatory marker assessment and sleep quality analysis</li>
+            <li><em>Evolution Outcome:</em> Enhanced cellular regeneration and systemic rejuvenation</li>
+        </ul>
+        
+        <h4>INTEGRATION PROTOCOL</h4>
+        <p><em>For those wishing to maintain benefits while transitioning to a more conventional schedule, our strategic maintenance protocol allows for sustained results with minimal time investment.</em></p>
+        
+        <div class="image-placeholder">
+            [Luxury timeline visualization showing 30-day extension with premium design aesthetic]
+        </div>
+        
+        <footer class="footer">
+            Smoothie Evolution: Premium Program
+        </footer>
+	</div>
+    <div class="page-number">11</div>
+</div>
+
+<!-- Page 12: Progress Monitoring System -->
+<div class="page">
+    <div class="page-content">
+        <h2>EVOLUTION METRICS: PREMIUM MONITORING PROTOCOL</h2>
+        
+        <p><em>True transformation requires precise measurement. Our comprehensive tracking system ensures you can observe measurable progress across multiple dimensions of wellbeing.</em></p>
+        
+        <h3>PRIMARY METRICS</h3>
+        <ul class="ingredient-list">
+            <li><em>Metabolic Efficiency Score</em> (calculated from multiple factors)</li>
+            <li><em>Cellular Vitality Index</em> (energy levels, recovery time, cognitive clarity)</li>
+            <li><em>Transformation Ratio</em> (beyond simple weight measurement)</li>
+            <li><em>Systemic Harmony Assessment</em> (digestion, sleep, mood stability)</li>
+        </ul>
+        
+        <h3>TRACKING METHODOLOGY</h3>
+        
+        <h4>Morning Assessment Protocol:</h4>
+        <ul class="ingredient-list">
+            <li>Complete brief biometric measurements upon waking</li>
+            <li>Record subjective wellness scores using provided scale</li>
+            <li>Document sleep quality metrics</li>
+        </ul>
+        
+        <h4>Evening Reflection Protocol:</h4>
+        <ul class="ingredient-list">
+            <li>Assess energy pattern throughout day</li>
+            <li>Record adherence to formulation schedule</li>
+            <li>Note any exceptional observations</li>
+        </ul>
+        
+        <h3>DIGITAL INTEGRATION</h3>
+        <p><em>Scan the provided QR code to access our premium digital monitoring system, offering sophisticated data visualization and pattern recognition to identify your unique response patterns.</em></p>
+        
+        <div class="image-placeholder">
+            [Luxury data visualization mockup of premium wellness tracking dashboard]
+        </div>
+        
+        <footer class="footer">
+            Smoothie Evolution: Premium Program
+        </footer>
+    </div>
+    <div class="page-number">12</div>
+</div>
+
+<!-- Page 13: Beyond Evolution -->
+<div class="page">
+    <div class="page-content">
+        <h2>EVOLUTION CONTINUUM: YOUR ONGOING JOURNEY</h2>
+        
+        <p><em>The conclusion of your initial Evolution Program marks not an endpoint, but a gateway to sustained transformation. Consider these pathways for continued advancement:</em></p>
+        
+        <h3>LIFESTYLE INTEGRATION</h3>
+        <p><em>Incorporate Evolution principles into your daily life through our Equilibrium System—a flexible framework that allows for social engagement while maintaining optimal wellness. Includes protocols for dining out, travel, and special occasions.</em></p>
+        
+        <h3>SEASONAL RECALIBRATION</h3>
+        <p><em>Our bodies exist in harmony with natural cycles. The Quarterly Evolution Reset offers seasonal formulations designed to address the unique challenges and opportunities of each season—from winter immune resilience to summer vitality optimization.</em></p>
+        
+        <h3>ADVANCED PROTOCOLS</h3>
+        <p><em>For those seeking to explore the frontiers of personal optimization, our Advanced Evolution series offers specialized protocols targeting specific dimensions of elite performance and longevity.</em></p>
+        
+        <h3>COMMUNITY ACCESS</h3>
+        <p><em>Join our exclusive Evolution Community for ongoing support, advanced knowledge, and connection with like-minded individuals pursuing exceptional wellbeing.</em></p>
+        
+        <h3>EVOLUTION CONCIERGE</h3>
+        <p><em>For personalized guidance, our Evolution Specialists offer one-on-one consultations to tailor your continued journey to your unique biochemistry, lifestyle, and objectives.</em></p>
+        
+        <div class="image-placeholder">
+            [Luxury lifestyle photography showing elegant morning ritual scene]
+        </div>
+        
+        <footer class="footer">
+            Smoothie Evolution: Premium Program
+        </footer>
+    </div>
+    <div class="page-number">13</div>
+</div>
+
+<!-- Page 14: Back Cover -->
+<div class="page">
+    <div class="page-content">
+        <div style="height: 60%; display: flex; flex-direction: column; justify-content: center; text-align: center;">
+            <h2>THE EVOLUTION AWAITS</h2>
+            
+            <p><em>This program represents the culmination of years of research, refinement, and client transformation. It stands not merely as a nutrition plan, but as a philosophy of exceptional living through intentional nourishment.</em></p>
+            
+            <p><em>The formulations, protocols, and systems contained within these pages offer more than temporary change—they provide a framework for lasting evolution of your relationship with wellbeing.</em></p>
+            
+            <p><em>Begin your journey with the confidence that each element has been meticulously crafted to honor both scientific precision and the art of luxurious simplicity.</em></p>
+            
+            <div class="tagline">EXCEPTIONAL WELLNESS, REDEFINED</div>
+            
+            <p style="margin-top: 3em;"><em>www.smoothieevolution.com</em></p>
+        </div>
+        
+        <div class="image-placeholder">
+            [Luxury brand photography of premium smoothie in crystal glass with gold rim]
+        </div>
+    </div>
+</div>
+
+</body>
+</html>

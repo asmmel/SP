@@ -228,13 +228,13 @@ class SettingsDialog(QDialog):
         
         # Добавляем поля для ввода диапазона времени работы сервиса (в секундах)
         self.mix_min_time = QSpinBox()
-        self.mix_min_time.setRange(60, 3600)  # от 1 минуты до 1 часа
+        self.mix_min_time.setRange(60, 18000)  # от 1 минуты до 1 часа
         self.mix_min_time.setValue(300)  # 5 минут по умолчанию
         self.mix_min_time.setSingleStep(60)  # шаг в 1 минуту
         self.mix_min_time.setSuffix(" сек")
         
         self.mix_max_time = QSpinBox()
-        self.mix_max_time.setRange(300, 7200)  # от 5 минут до 2 часов
+        self.mix_max_time.setRange(300, 18000)  # от 5 минут до 2 часов
         self.mix_max_time.setValue(1800)  # 30 минут по умолчанию
         self.mix_max_time.setSingleStep(60)  # шаг в 1 минуту
         self.mix_max_time.setSuffix(" сек")

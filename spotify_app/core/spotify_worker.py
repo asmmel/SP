@@ -198,10 +198,17 @@ class SpotifyWorker(SignalEmitter):
             raise
 
     def _handle_device_progress(self, device: str, current: int, total: int):
-        progress = f"{current}/{total} ({(current/total*100):.1f}%)"
-        self.progress_updated.emit(device, progress)
-        self.log_message.emit("INFO", f"Device {device} progress: {progress}")
-
+        try:
+            if total <= 0:  # Защита от деления на ноль
+                progress = f"{current}/0 (0.0%)"
+            else:
+                progress = f"{current}/{total} ({(current/total*100):.1f}%)"
+                
+            self.progress_updated.emit(device, progress)
+            self.log_message.emit("INFO", f"Device {device} progress: {progress}")
+        except Exception as e:
+            self.log_message.emit("ERROR", f"Error handling progress: {str(e)}")
+            
     def _handle_status_update(self, status: str):
         self.status_updated.emit(status)
         self.log_message.emit("INFO", status)

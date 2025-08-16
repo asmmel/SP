@@ -576,7 +576,8 @@ class SpotifyAutomation:
                 "Spotify isn't responding",
                 "isn't responding",
                 "Close app",
-                "DISMISS"
+                "DISMISS",
+                "Maybe Later"
             ]
             
             for text in anr_texts:

@@ -203,7 +203,11 @@ class MixWorker(QThread):
     def _handle_device_progress(self, device: str, current: int, total: int, service_type: str):
         """Обработчик обновления прогресса"""
         try:
-            progress = f"{current}/{total} ({(current/total*100):.1f}%)"
+            if total <= 0:  # Защита от деления на ноль
+                progress = f"{current}/0 (0.0%)"
+            else:
+                progress = f"{current}/{total} ({(current/total*100):.1f}%)"
+                
             self.progress_updated.emit(device, progress, service_type)
             self.log_message.emit("INFO", f"Устройство {device} ({service_type}): {progress}")
         except Exception as e:
@@ -251,14 +255,16 @@ class MixWorker(QThread):
             
             # Регистрируем обработчики обновления прогресса
             def spotify_progress_handler(device, current, total):
+                # Простой адаптер, добавляет тип сервиса
                 self._handle_device_progress(device, current, total, 'spotify')
             
             def apple_progress_handler(device, current, total):
+                # Простой адаптер, добавляет тип сервиса
                 self._handle_device_progress(device, current, total, 'apple_music')
             
             self.spotify_automation.on_device_progress = spotify_progress_handler
             self.apple_music_automation.on_device_progress = apple_progress_handler
-            
+                    
             # Общий обработчик статуса
             self.spotify_automation.on_status_update = self._handle_status_update
             self.apple_music_automation.on_status_update = self._handle_status_update
@@ -321,7 +327,16 @@ class MixWorker(QThread):
             self.apple_music_automation.split_database(self.config.database_path)
             
             # Инициализируем начальный сервис для каждого устройства случайно
+            # Подсчитываем общее количество треков в базе
+            total_songs = sum(1 for line in open(self.config.database_path) if line.strip())
+            
+            # Устанавливаем это значение для обоих автоматизаций
             for device in devicelist:
+                spotify_state = self.spotify_automation.get_device_state(device)
+                spotify_state.total_songs = total_songs
+                
+                apple_state = self.apple_music_automation.get_device_state(device) 
+                apple_state.total_songs = total_songs
                 self._switch_service(device, initial=True)
             
             # Основной цикл обработки устройств

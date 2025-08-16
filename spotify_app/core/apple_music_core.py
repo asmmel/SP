@@ -8,6 +8,7 @@ from datetime import datetime
 import os
 import socket
 import logging
+import re
 from threading import Lock
 from typing import List, Dict, Optional, Set
 from dataclasses import dataclass, field
@@ -270,106 +271,149 @@ class AppleMusicAutomation:
                 state._save_track_plays()
                 return [song]
             
+    async def wait_for_search_results(self, d, timeout=15):
+        """
+        Ожидает загрузки результатов поиска в Apple Music.
+        
+        Args:
+            d: Объект устройства uiautomator2
+            timeout: Максимальное время ожидания в секундах
+            
+        Returns:
+            bool: True если результаты загрузились, False если время ожидания истекло
+        """
+        start_time = time.time()
+        
+        # Минимальное время ожидания для стабильности
+        min_wait = 3
+        
+        while time.time() - start_time < timeout:
+            # Пробуем несколько разных селекторов для поиска результатов
+            if d(textContains="Song •").exists and (time.time() - start_time >= min_wait):
+                logger.info("Результаты поиска загружены (по тексту 'Song •')")
+                return True
+                
+            if d(resourceId="com.apple.android.music:id/search_results_recyclerview").child(className="android.view.ViewGroup").exists and (time.time() - start_time >= min_wait):
+                logger.info("Результаты поиска загружены (по recyclerview)")
+                return True
+            
+            # Проверяем индикатор загрузки
+            if d(resourceId="com.apple.android.music:id/progress_bar").exists:
+                logger.debug("Идет загрузка результатов...")
+                
+            await asyncio.sleep(0.5)
+        
+        logger.warning(f"Результаты поиска не определены как загруженные за {timeout} секунд")
+        return False
+
     async def search_and_play(self, d, name_artist: str):
-        """Поиск и воспроизведение трека"""
+        """Поиск и воспроизведение трека в Apple Music"""
         if not name_artist.strip():
-            logger.warning('Artist Name is empty')
+            logger.warning('Имя исполнителя пусто')
             return
 
         try:
             d.implicitly_wait(10.0)
             
-            # Проверяем диалог перед каждой операцией
+            # Проверяем диалог "Приложение не отвечает"
             if self._handle_app_not_responding(d):
-                logger.info("Restarting after ANR")
+                logger.info("Перезапуск после диалога ANR")
                 if not self.restart_apple(d):
                     return
                     
-            self._handle_popups(d)  # Обрабатываем всплывающие окна
+            # Обрабатываем всплывающие окна
+            self._handle_popups(d)
             
+            # Проверяем, запущено ли приложение Apple Music
             if not self.is_app_running(d):
                 logger.info("Перезапуск Apple Music...")
                 if not self.restart_apple(d):
                     return
-
-                    
-            search_button = d(resourceId="com.apple.android.music:id/search_src_text")
-            if not search_button.exists:
-                logger.warning("Search button not found, trying to restart")
+            
+            # Находим поле поиска
+            search_field = d(resourceId="com.apple.android.music:id/search_src_text")
+            if not search_field.exists:
+                logger.warning("Поле поиска не найдено, перезапуск Apple Music")
                 if not self.restart_apple(d):
                     return
-                    
-            # Обрабатываем всплывающие окна перед поиском
-            self._handle_popups(d)
                 
-            search_button.click()
+                # Пробуем еще раз найти поле поиска
+                search_field = d(resourceId="com.apple.android.music:id/search_src_text")
+                if not search_field.exists:
+                    logger.error("Поле поиска не найдено после перезапуска")
+                    self.artists_not_found.append(name_artist)
+                    return
+            
+            # Кликаем на поле поиска и вводим запрос
+            search_field.click()
             time.sleep(1)
             d.send_keys(name_artist)
+            time.sleep(1)
             
-            # Ожидание результатов поиска
-            search_results_loaded = False
-            timeout = 15  # секунд на ожидание
-            start_time = time.time()
+            # Нажимаем Enter для выполнения поиска
+            d.press("enter")
+            time.sleep(2)
             
-            # Ждем появления результатов в списке
-            while time.time() - start_time < timeout:
-                results_view = d(resourceId="com.apple.android.music:id/search_results_recyclerview")
-                if results_view.exists and results_view.child(className="android.view.ViewGroup").exists:
-                    search_results_loaded = True
-                    logger.info("Результаты поиска загружены")
-                    break
-                # Проверяем индикатор загрузки, если он есть
-                if d(resourceId="com.apple.android.music:id/progress_bar").exists:
-                    logger.debug("Идет загрузка результатов...")
-                await asyncio.sleep(0.5)
+            # Ожидаем загрузки результатов поиска
+            results_loaded = await self.wait_for_search_results(d, timeout=15)
             
-            # Если результаты не загрузились за отведенное время, или пустые
-            if not search_results_loaded:
-                logger.warning(f"Результаты поиска не загрузились за {timeout} секунд")
-                d.press('enter')  # Все равно пробуем нажать Enter
-                time.sleep(2)
+            # Получаем имя артиста для поиска
+            artist_name = name_artist.split()[-1]
+            track_found = False
+            
+            # Даже если wait_for_search_results вернул False, все равно пробуем найти результаты
+            # Задержка перед попыткой найти элементы
+            time.sleep(3)
+            
+            # Пытаемся найти элемент с текстом "Song • Artist"
+            song_element = d(textMatches=f"Song • .*{re.escape(artist_name)}.*")
+            if song_element.exists:
+                song_element.click()
+                logger.info(f"Найден и выбран трек с именем артиста '{artist_name}'")
+                track_found = True
             else:
-                # Результаты загрузились, нажимаем Enter для продолжения поиска
-                d.press('enter')
-                time.sleep(2)
-                
-            # Ждем загрузки окончательных результатов после нажатия Enter
-            final_results_loaded = False
-            start_time = time.time()
+                # Если точное совпадение не найдено, выбираем первый элемент с "Song •"
+                first_song = d(textContains="Song •", instance=0)
+                if first_song.exists:
+                    first_song.click()
+                    logger.info(f"Выбран первый результат для '{name_artist}'")
+                    track_found = True
+                else:
+                    # Если не нашли по тексту, пробуем по XPath
+                    first_result = d.xpath('//*[@resource-id="com.apple.android.music:id/search_results_recyclerview"]/android.view.ViewGroup[1]')
+                    if first_result.exists:
+                        first_result.click()
+                        logger.info(f"Выбран первый результат через XPath для '{name_artist}'")
+                        track_found = True
             
-            while time.time() - start_time < timeout:
-                results_view = d(resourceId="com.apple.android.music:id/search_results_recyclerview")
-                if results_view.exists and results_view.child(className="android.view.ViewGroup").exists:
-                    final_results_loaded = True
-                    logger.info("Финальные результаты поиска загружены")
-                    break
-                await asyncio.sleep(0.5)
-                
-            if not final_results_loaded:
-                logger.warning("Финальные результаты поиска не загрузились")
-                # Добавляем в список ненайденных
+            # Если трек не найден и результаты не были определены как загруженные
+            if not track_found:
+                if not results_loaded:
+                    logger.warning(f"Результаты поиска не загрузились и трек не найден для '{name_artist}'")
+                else:
+                    logger.warning(f"Результаты поиска загрузились, но трек не найден для '{name_artist}'")
+                    
+                # Добавляем в список ненайденных и закрываем поиск
                 self.artists_not_found.append(name_artist)
-                # Пытаемся закрыть поиск
                 if d(resourceId="com.apple.android.music:id/search_close_btn").exists:
                     d(resourceId="com.apple.android.music:id/search_close_btn").click()
                 return
-
-            name_track = d.xpath('//*[@resource-id="com.apple.android.music:id/search_results_recyclerview"]/android.view.ViewGroup[1]')
-            if name_track.exists:
-                name_track.click()
-                time.sleep(3)
-                self._handle_wrong_navigation(d, name_artist)
-            else:
-                logger.info(f"{name_artist} не найден")
-                self.artists_not_found.append(name_artist)
-
-            # Проверяем диалог и всплывающие окна перед закрытием поиска
-            self._handle_popups(d)
-                
-            d(resourceId="com.apple.android.music:id/search_close_btn").click()
-
+            
+            # Даем время на начало воспроизведения
+            time.sleep(3)
+            
+            # Проверяем на случай неправильной навигации
+            self._handle_wrong_navigation(d, name_artist)
+            
+            # Закрываем поиск
+            if d(resourceId="com.apple.android.music:id/search_close_btn").exists:
+                d(resourceId="com.apple.android.music:id/search_close_btn").click()
+            
+            logger.info(f"Трек '{name_artist}' успешно запущен")
+            
         except Exception as e:
-            logger.error(f"Ошибка при поиске трека: {str(e)}")
+            logger.error(f"Ошибка при поиске трека '{name_artist}': {str(e)}")
+            self.artists_not_found.append(name_artist)
             raise
 
     def _handle_popups(self, d):
@@ -414,7 +458,7 @@ class AppleMusicAutomation:
 
             # Обработка системных диалогов
             system_buttons = [
-                "ALLOW", "DENY", "OK", "Cancel", "Later", "Close"
+                "ALLOW", "DENY", "OK", "Cancel", "Later",
             ]
             for button in system_buttons:
                 if d(text=button).exists:
