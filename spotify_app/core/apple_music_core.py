@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from contextlib import contextmanager
 import asyncio
 from utils.config import Config
+from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +107,8 @@ class AppleMusicAutomation:
         self.on_status_update = None
         self.running = True
         self.artists_not_found = []
+        self.device_locks = {}  # ДОБАВИТЬ
+        self.executor = ThreadPoolExecutor(max_workers=20)  # ДОБАВИТЬ
         self._load_cache()
 
     def get_device_state(self, device: str) -> DeviceState:
@@ -307,114 +310,180 @@ class AppleMusicAutomation:
         return False
 
     async def search_and_play(self, d, name_artist: str):
-        """Поиск и воспроизведение трека в Apple Music"""
+        """Умный поиск с адаптивным таймингом"""
         if not name_artist.strip():
-            logger.warning('Имя исполнителя пусто')
+            logger.warning('Artist Name is empty')
             return
 
         try:
             d.implicitly_wait(10.0)
             
-            # Проверяем диалог "Приложение не отвечает"
+            # Проверяем диалог и всплывающие окна
             if self._handle_app_not_responding(d):
-                logger.info("Перезапуск после диалога ANR")
+                logger.info("Restarting after ANR")
                 if not self.restart_apple(d):
                     return
                     
-            # Обрабатываем всплывающие окна
             self._handle_popups(d)
             
-            # Проверяем, запущено ли приложение Apple Music
             if not self.is_app_running(d):
                 logger.info("Перезапуск Apple Music...")
                 if not self.restart_apple(d):
                     return
-            
-            # Находим поле поиска
-            search_field = d(resourceId="com.apple.android.music:id/search_src_text")
-            if not search_field.exists:
-                logger.warning("Поле поиска не найдено, перезапуск Apple Music")
+
+            search_button = d(resourceId="com.apple.android.music:id/search_src_text")
+            if not search_button.exists:
+                logger.warning("Search button not found, trying to restart")
                 if not self.restart_apple(d):
                     return
+                    
+            self._handle_popups(d)
                 
-                # Пробуем еще раз найти поле поиска
-                search_field = d(resourceId="com.apple.android.music:id/search_src_text")
-                if not search_field.exists:
-                    logger.error("Поле поиска не найдено после перезапуска")
-                    self.artists_not_found.append(name_artist)
-                    return
-            
-            # Кликаем на поле поиска и вводим запрос
-            search_field.click()
+            # 1. ВВОД ЗАПРОСА И НАЖАТИЕ ENTER
+            search_button.click()
             time.sleep(1)
             d.send_keys(name_artist)
             time.sleep(1)
+            d.press('enter')            
+            logger.info(f"Запрос '{name_artist}' введен, Enter нажат")
             
-            # Нажимаем Enter для выполнения поиска
-            d.press("enter")
-            time.sleep(2)
+            # 2. БЫСТРАЯ ПРОВЕРКА (5 СЕКУНД)
+            logger.info("Быстрая проверка загрузки (5 сек)...")
+            quick_result = await self._wait_for_search_results(d, timeout=5)
             
-            # Ожидаем загрузки результатов поиска
-            results_loaded = await self.wait_for_search_results(d, timeout=15)
-            
-            # Получаем имя артиста для поиска
-            artist_name = name_artist.split()[-1]
-            track_found = False
-            
-            # Даже если wait_for_search_results вернул False, все равно пробуем найти результаты
-            # Задержка перед попыткой найти элементы
-            time.sleep(3)
-            
-            # Пытаемся найти элемент с текстом "Song • Artist"
-            song_element = d(textMatches=f"Song • .*{re.escape(artist_name)}.*")
-            if song_element.exists:
-                song_element.click()
-                logger.info(f"Найден и выбран трек с именем артиста '{artist_name}'")
-                track_found = True
-            else:
-                # Если точное совпадение не найдено, выбираем первый элемент с "Song •"
-                first_song = d(textContains="Song •", instance=0)
-                if first_song.exists:
-                    first_song.click()
-                    logger.info(f"Выбран первый результат для '{name_artist}'")
-                    track_found = True
+            if quick_result:
+                # 3А. РЕЗУЛЬТАТЫ ЗАГРУЗИЛИСЬ БЫСТРО - СРАЗУ ВКЛЮЧАЕМ
+                logger.info("✅ Результаты загружены за 5 сек - включаем трек")
+                success = await self._play_first_result(d, name_artist)
+                await self._clear_search_field(d)
+                
+                if success:
+                    logger.info(f"🎵 Трек '{name_artist}' успешно включен")
                 else:
-                    # Если не нашли по тексту, пробуем по XPath
-                    first_result = d.xpath('//*[@resource-id="com.apple.android.music:id/search_results_recyclerview"]/android.view.ViewGroup[1]')
-                    if first_result.exists:
-                        first_result.click()
-                        logger.info(f"Выбран первый результат через XPath для '{name_artist}'")
-                        track_found = True
-            
-            # Если трек не найден и результаты не были определены как загруженные
-            if not track_found:
-                if not results_loaded:
-                    logger.warning(f"Результаты поиска не загрузились и трек не найден для '{name_artist}'")
-                else:
-                    logger.warning(f"Результаты поиска загрузились, но трек не найден для '{name_artist}'")
-                    
-                # Добавляем в список ненайденных и закрываем поиск
-                self.artists_not_found.append(name_artist)
-                if d(resourceId="com.apple.android.music:id/search_close_btn").exists:
-                    d(resourceId="com.apple.android.music:id/search_close_btn").click()
+                    logger.warning(f"❌ Не удалось включить трек '{name_artist}'")
+                    self.artists_not_found.append(name_artist)
                 return
             
-            # Даем время на начало воспроизведения
-            time.sleep(3)
+            # 3Б. РЕЗУЛЬТАТЫ НЕ ЗАГРУЗИЛИСЬ - ЖДЕМ ЕЩЕ 7 СЕКУНД
+            logger.info("⏳ Результаты не загружены, ждем еще 7 сек...")
+            extended_result = await self._wait_for_search_results(d, timeout=7)
             
-            # Проверяем на случай неправильной навигации
-            self._handle_wrong_navigation(d, name_artist)
-            
-            # Закрываем поиск
-            if d(resourceId="com.apple.android.music:id/search_close_btn").exists:
-                d(resourceId="com.apple.android.music:id/search_close_btn").click()
-            
-            logger.info(f"Трек '{name_artist}' успешно запущен")
-            
+            if extended_result:
+                # 4А. ЗАГРУЗИЛИСЬ ПОСЛЕ ДОПОЛНИТЕЛЬНОГО ОЖИДАНИЯ
+                logger.info("✅ Результаты загружены после дополнительного ожидания - включаем")
+                success = await self._play_first_result(d, name_artist)
+                await self._clear_search_field(d)
+                
+                if success:
+                    logger.info(f"🎵 Трек '{name_artist}' включен после ожидания")
+                else:
+                    self.artists_not_found.append(name_artist)
+            else:
+                # 4Б. НЕ ЗАГРУЗИЛИСЬ И ПОСЛЕ 12 СЕКУНД ОБЩЕГО ОЖИДАНИЯ
+                logger.warning(f"⚠️ Результаты для '{name_artist}' не загрузились за 12 сек - пропускаем")
+                self.artists_not_found.append(name_artist)
+                await self._clear_search_field(d)
+
         except Exception as e:
             logger.error(f"Ошибка при поиске трека '{name_artist}': {str(e)}")
-            self.artists_not_found.append(name_artist)
+            await self._clear_search_field(d)
             raise
+
+    async def _wait_for_search_results(self, d, timeout: int) -> bool:
+        """
+        Ожидание загрузки результатов поиска
+        
+        Args:
+            d: устройство
+            timeout: время ожидания в секундах
+            
+        Returns:
+            bool: True если результаты загружены, False если таймаут
+        """
+        start_time = time.time()
+        check_interval = 0.5  # Проверяем каждые 500мс
+        
+        logger.debug(f"Начинаем ожидание результатов на {timeout} сек")
+        
+        while time.time() - start_time < timeout:
+            try:
+                # Проверяем наличие результатов
+                results_view = d(resourceId="com.apple.android.music:id/search_results_recyclerview")
+                
+                if results_view.exists:
+                    # Проверяем, есть ли реальные результаты (не пустой список)
+                    first_result = d.xpath('//*[@resource-id="com.apple.android.music:id/search_results_recyclerview"]/android.view.ViewGroup[1]')
+                    
+                    if first_result.exists:
+                        elapsed = time.time() - start_time
+                        logger.info(f"🎯 Результаты найдены за {elapsed:.1f} сек")
+                        return True
+                
+                # Проверяем индикатор загрузки
+                if d(resourceId="com.apple.android.music:id/progress_bar").exists:
+                    logger.debug("⏳ Идет загрузка...")
+                
+                await asyncio.sleep(check_interval)
+                
+            except Exception as e:
+                logger.error(f"Ошибка при проверке результатов: {str(e)}")
+                break
+        
+        elapsed = time.time() - start_time
+        logger.warning(f"⏰ Таймаут ожидания {timeout} сек (прошло {elapsed:.1f} сек)")
+        return False
+
+    async def _play_first_result(self, d, name_artist: str) -> bool:
+        """
+        Включение первого результата из поиска
+        
+        Returns:
+            bool: True если трек включен успешно
+        """
+        try:
+            # Небольшая пауза для стабильности
+            await asyncio.sleep(0.5)
+            
+            # Ищем первый результат
+            first_track = d.xpath('//*[@resource-id="com.apple.android.music:id/search_results_recyclerview"]/android.view.ViewGroup[1]')
+            
+            if first_track.exists:
+                logger.debug(f"Найден первый результат для '{name_artist}', кликаем")
+                first_track.click()
+                
+                # Ждем начала воспроизведения
+                await asyncio.sleep(2)
+                
+                # Проверяем, не попали ли в неправильное место
+                self._handle_wrong_navigation(d, name_artist)
+                
+                logger.debug(f"Трек '{name_artist}' успешно включен")
+                return True
+            else:
+                logger.warning(f"Первый результат не найден для '{name_artist}'")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Ошибка при включении трека '{name_artist}': {str(e)}")
+            return False
+
+    async def _clear_search_field(self, d):
+        """Быстрая очистка поля поиска"""
+        try:
+            # Обрабатываем всплывающие окна перед закрытием
+            self._handle_popups(d)
+            
+            # Закрываем поиск
+            close_button = d(resourceId="com.apple.android.music:id/search_close_btn")
+            if close_button.exists:
+                close_button.click()
+                await asyncio.sleep(0.3)  # Минимальная пауза
+                logger.debug("Поиск закрыт")
+            else:
+                logger.warning("Кнопка закрытия поиска не найдена")
+                
+        except Exception as e:
+            logger.error(f"Ошибка при очистке поиска: {str(e)}")
 
     def _handle_popups(self, d):
         """Обработка всплывающих окон"""
@@ -473,63 +542,82 @@ class AppleMusicAutomation:
             logger.error(f"Error handling popups: {str(e)}")
 
     async def process_device(self, device: str):
-        """Обработка одного устройства"""
+        """Оптимизированная обработка устройства с умным таймингом"""
         state = self.get_device_state(device)
-        logger.info(f"Starting device {device} processing. Total songs: {state.total_songs}")
+        logger.info(f"🚀 Запуск обработки устройства {device}. Всего треков: {state.total_songs}")
         
         last_proxy_check = time.time()
         proxy_check_interval = 3600  # 1 час
         
         while state.songs_played < state.total_songs and self.running:
-            # Проверка прокси
+            # Проверка прокси раз в час
             current_time = time.time()
             if current_time - last_proxy_check >= proxy_check_interval:
                 try:
                     d = u2.connect(device)
                     proxy_status = await self.check_proxy(d, device)
                     if not proxy_status:
-                        logger.warning(f"Proxy check failed on {device}, attempting full restart")
-                        if not await self.restart_proxy_full(d, device):
-                            logger.error(f"Failed to restore proxy functionality on {device}")
+                        logger.warning(f"Прокси на {device} не работает, перезапускаем")
+                        await self.restart_proxy_full(d, device)
                     last_proxy_check = current_time
                 except Exception as e:
-                    logger.error(f"Error during proxy check: {str(e)}")
+                    logger.error(f"Ошибка проверки прокси: {str(e)}")
             
-            # Получение трека
+            # Основная логика обработки трека
             retries = self.config.retry_attempts
-            while retries > 0 and self.running:
+            track_processed = False
+            
+            while retries > 0 and self.running and not track_processed:
                 try:
+                    # Подключаемся к устройству
                     d = u2.connect(device)
+                    
+                    # Получаем следующий трек
                     result = self.get_name(device)
                     if not result:
-                        logger.info(f"No more available tracks for device {device}")
-                        return  # Завершаем устройство, если нет треков
+                        logger.info(f"✅ Устройство {device} обработало все доступные треки")
+                        return
                     
                     name_artist = result[0]
-                    logger.info(f"Device {device}: Playing song {name_artist}")
-                    await self.search_and_play(d, name_artist)
-                    state.songs_played += 1
+                    logger.info(f"🎵 Устройство {device}: Обрабатываем '{name_artist}'")
                     
+                    # КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: используем умный поиск с адаптивным таймингом
+                    await self.search_and_play(d, name_artist)
+                    
+                    # Обновляем статистику
+                    state.songs_played += 1
+                    track_processed = True
+                    
+                    # Обновляем UI
                     if self.on_device_progress:
                         self.on_device_progress(device, state.songs_played, state.total_songs)
                     
+                    # Периодическое сохранение кэша
                     if state.songs_played % 10 == 0:
                         self._periodic_cache_save()
                     
-                    logger.info(f"Device {device} progress: {state.songs_played}/{state.total_songs}")
-                    break  # Успешно проиграли, выходим из retries
-                
+                    progress_percent = (state.songs_played / state.total_songs) * 100
+                    logger.info(f"📊 Устройство {device}: {state.songs_played}/{state.total_songs} ({progress_percent:.1f}%)")
+                    
                 except Exception as e:
-                    logger.error(f"Error on device {device}, attempt {self.config.retry_attempts - retries + 1}: {str(e)}")
+                    logger.error(f"❌ Ошибка на устройстве {device}, попытка {self.config.retry_attempts - retries + 1}: {str(e)}")
                     retries -= 1
+                    
                     if retries == 0:
+                        logger.error(f"💥 Максимум попыток достигнут для устройства {device}")
                         self._handle_error("MaxRetriesExceeded", e, device, True)
-                    await asyncio.sleep(5)
+                        track_processed = True  # Переходим к следующему треку
+                    else:
+                        await asyncio.sleep(3)  # Пауза перед повтором
             
             if not self.running:
+                logger.info(f"🛑 Остановка обработки устройства {device}")
                 return
             
-            await asyncio.sleep(2)
+            # Минимальная пауза между треками
+            await asyncio.sleep(0.5)
+        
+        logger.info(f"🏁 Устройство {device} завершило обработку всех треков")
 
     def restart_apple(self, d):
         """Перезапуск Apple Music"""
@@ -604,6 +692,7 @@ class AppleMusicAutomation:
         try:
             logger.info("Stopping Apple Music automation...")
             self.running = False
+            self.cleanup()
             
             # Сохраняем текущее состояние
             self._save_cache()
@@ -762,103 +851,176 @@ class AppleMusicAutomation:
         """Проверка работы приложения"""
         current_app = d.app_current()
         return current_app["package"] == "com.apple.android.music" if current_app else False
+    
 
-    # Исправленная версия функции play_circles:
-
-    async def play_circles(self):
-        """Выполнение циклов воспроизведения до исчерпания лимитов"""
+    async def play_circles_sequential(self):
+        """Последовательная обработка устройств - один за другим"""
         self.running = True
-        logger.info(f'Starting playback process')
+        logger.info(f'🎬 Запуск последовательной обработки устройств')
         self.split_database(self.config.database_path)
         
         timestamp_start = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         logger.info(f"Start {self.config.service_type.capitalize()}: [{timestamp_start}]")
         
-        cycle_count = 0
-        while self.running:
-            cycle_count += 1
-            logger.info(f"Starting cycle {cycle_count}")
-
-            # Проверка доступных треков
-            available_tracks = False
-            prefix = "apple" if self.config.service_type == "apple_music" else self.config.service_type
-            for device in self.devicelist:
-                state = self.get_device_state(device)
-                for i in range(1, 1000):
-                    file_path = f"data/database_part_{prefix}_{i}.txt"
-                    if not os.path.exists(file_path):
-                        break
-                    with open(file_path) as f:
-                        for line in f:
-                            track = line.strip()
-                            if track and state.can_play_track(track):  # Только лимит прослушиваний
-                                available_tracks = True
-                                logger.debug(f"Found available track for {device}: {track}")
-                                break
-                    if available_tracks:
-                        break
+        # Инициализируем общее количество треков для всех устройств
+        total_songs = sum(1 for line in open(self.config.database_path) if line.strip())
+        for device in self.devicelist:
+            state = self.get_device_state(device)
+            state.total_songs = total_songs
+        
+        # ГЛАВНЫЙ ЦИКЛ - обрабатываем устройства по кругу
+        current_device_index = 0
+        max_empty_rounds = 3  # Максимум пустых кругов подряд
+        empty_rounds = 0
+        
+        while self.running and empty_rounds < max_empty_rounds:
+            round_had_tracks = False
             
-            if not available_tracks:
-                logger.info("All tracks have reached their maximum play limits")
-                await self._send_completion_report()
-                self.running = False
-                break
-            
-            # Запускаем процессы для устройств
-            tasks = [self.process_device(device) for device in self.devicelist]
-            try:
-                await asyncio.gather(*tasks)
-            except asyncio.CancelledError:
-                logger.info("Tasks cancelled")
-                break
-            
-            if self.running:
-                await self.finish_play()
-
-    async def finish_play(self):
-        """Завершение цикла воспроизведения и подготовка к следующему"""
-        try:
-            logger.info('Finishing playback')
-            self._save_cache()
-            await self._send_completion_report()
-            
-            # Проверяем остались ли треки
-            prefix = "apple" if self.config.service_type == "apple_music" else self.config.service_type
-            any_tracks_available = False
-            for device in self.devicelist:
-                state = self.get_device_state(device)
-                device_available = 0
-                for i in range(1, 1000):
-                    file_path = f"data/database_part_{prefix}_{i}.txt"
-                    if not os.path.exists(file_path):
-                        break
-                    with open(file_path) as f:
-                        for line in f:
-                            track = line.strip()
-                            if track and state.can_play_track(track):
-                                device_available += 1
-                logger.info(f"Device {device} has {device_available} tracks available for next cycle")
-                if device_available > 0:
-                    any_tracks_available = True
+            # Проходим по всем устройствам по кругу
+            for i in range(len(self.devicelist)):
+                if not self.running:
                     break
+                    
+                device = self.devicelist[current_device_index]
+                current_device_index = (current_device_index + 1) % len(self.devicelist)
+                
+                # Обрабатываем ОДИН трек на устройстве
+                track_processed = await self.process_single_track(device)
+                
+                if track_processed:
+                    round_had_tracks = True
+                    empty_rounds = 0  # Сбрасываем счетчик пустых кругов
+                
+                # Маленькая пауза между устройствами
+                await asyncio.sleep(0.2)
             
-            if not any_tracks_available:
-                logger.info("No more tracks available for any device")
-                await self._send_completion_report()
-                self.running = False
-                return
+            # Если в этом круге не было обработано ни одного трека
+            if not round_had_tracks:
+                empty_rounds += 1
+                logger.info(f"⭕ Пустой круг {empty_rounds}/{max_empty_rounds}")
+                await asyncio.sleep(2)  # Пауза между пустыми кругами
             
-            # Если есть треки, сбрасываем состояние для нового цикла
-            logger.info("Tracks still available, preparing for next cycle")
-            await self._reset_state_for_new_cycle()
+            # Проверяем лимиты
+            if self.check_play_limits_reached():
+                logger.info("🎯 Достигнуты лимиты воспроизведения")
+                break
+        
+        logger.info("🏁 Последовательная обработка завершена")
+        await self._send_completion_report()
+
+    async def process_single_track(self, device: str) -> bool:
+        """
+        Обработка ОДНОГО трека на устройстве
+        
+        Returns:
+            bool: True если трек был обработан, False если треков больше нет
+        """
+        try:
+            state = self.get_device_state(device)
             
-            delay = self.config.delay_between_circles
-            logger.info(f"Sleeping for {delay} seconds before next cycle")
-            await asyncio.sleep(delay)
+            # Проверяем, есть ли еще треки для этого устройства
+            if state.songs_played >= state.total_songs:
+                logger.debug(f"✅ Устройство {device} завершило все треки")
+                return False
+            
+            # Получаем следующий трек
+            result = self.get_name(device)
+            if not result:
+                logger.info(f"📭 Нет доступных треков для устройства {device}")
+                return False
+            
+            name_artist = result[0]
+            logger.info(f"🎵 Устройство {device}: '{name_artist}'")
+            
+            # Подключаемся к устройству
+            retries = self.config.retry_attempts
+            while retries > 0:
+                try:
+                    d = u2.connect(device)
+                    
+                    # Обрабатываем трек с умным таймингом
+                    await self.search_and_play(d, name_artist)
+                    
+                    # Обновляем статистику
+                    state.songs_played += 1
+                    
+                    # Обновляем UI
+                    if self.on_device_progress:
+                        self.on_device_progress(device, state.songs_played, state.total_songs)
+                    
+                    # Периодическое сохранение
+                    if state.songs_played % 10 == 0:
+                        self._periodic_cache_save()
+                    
+                    progress_percent = (state.songs_played / state.total_songs) * 100
+                    logger.info(f"📊 {device}: {state.songs_played}/{state.total_songs} ({progress_percent:.1f}%)")
+                    
+                    return True  # Трек успешно обработан
+                    
+                except Exception as e:
+                    logger.error(f"❌ Ошибка на {device}: {str(e)}")
+                    retries -= 1
+                    if retries > 0:
+                        await asyncio.sleep(2)
+                    else:
+                        logger.error(f"💥 Максимум попыток для {device}")
+                        # Все равно считаем трек обработанным, чтобы перейти к следующему
+                        state.songs_played += 1
+                        return True
+            
+            return False
             
         except Exception as e:
-            logger.error(f"Error in finish_play: {str(e)}")
-            logger.exception("Full error details:")
+            logger.error(f"💥 Критическая ошибка для устройства {device}: {str(e)}")
+            return False
+
+    # Исправленная версия функции play_circles:
+
+    
+    # async def finish_play(self):
+    #     """Завершение цикла воспроизведения и подготовка к следующему"""
+    #     try:
+    #         logger.info('Finishing playback')
+    #         self._save_cache()
+    #         await self._send_completion_report()
+            
+    #         # Проверяем остались ли треки
+    #         prefix = "apple" if self.config.service_type == "apple_music" else self.config.service_type
+    #         any_tracks_available = False
+    #         for device in self.devicelist:
+    #             state = self.get_device_state(device)
+    #             device_available = 0
+    #             for i in range(1, 1000):
+    #                 file_path = f"data/database_part_{prefix}_{i}.txt"
+    #                 if not os.path.exists(file_path):
+    #                     break
+    #                 with open(file_path) as f:
+    #                     for line in f:
+    #                         track = line.strip()
+    #                         if track and state.can_play_track(track):
+    #                             device_available += 1
+    #             logger.info(f"Device {device} has {device_available} tracks available for next cycle")
+    #             if device_available > 0:
+    #                 any_tracks_available = True
+    #                 break
+            
+    #         if not any_tracks_available:
+    #             logger.info("No more tracks available for any device")
+    #             await self._send_completion_report()
+    #             self.running = False
+    #             return
+            
+    #         # Если есть треки, сбрасываем состояние для нового цикла
+    #         logger.info("Tracks still available, preparing for next cycle")
+    #         await self._reset_state_for_new_cycle()
+            
+    #         delay = self.config.delay_between_circles
+    #         logger.info(f"Sleeping for {delay} seconds before next cycle")
+    #         await asyncio.sleep(delay)
+            
+    #     except Exception as e:
+    #         logger.error(f"Error in finish_play: {str(e)}")
+    #         logger.exception("Full error details:")
 
     async def _reset_state_for_new_cycle(self):
         """Сброс состояния для нового цикла"""
@@ -1084,6 +1246,7 @@ class AppleMusicAutomation:
             logger.error(f"Error handling ANR dialog: {str(e)}")
             return False
 
+    # ИЗМЕНЕННАЯ ФУНКЦИЯ MAIN
     async def main(self):
         try:
             logger.info(f"Config max_plays_per_track: {self.config.max_plays_per_track}")
@@ -1091,31 +1254,565 @@ class AppleMusicAutomation:
                 logger.error("Database file not found!")
                 return False
             
+            # Проверяем лимиты
             if self.check_play_limits_reached():
-                logger.info("Maximum plays reached for all tracks, stopping automation")
+                logger.info("Maximum plays reached for all tracks")
                 await self._send_completion_report()
                 self.running = False
                 return True
-            
+
             self.initialize_devices()
             if not self.devicelist:
                 logger.error("No devices found!")
                 return False
+
+            logger.info(f"🚀 Запуск автоматизации: {len(self.devicelist)} устройств")
             
-            total_songs = sum(1 for line in open(self.config.database_path) if line.strip())
-            for device in self.devicelist:
-                state = self.get_device_state(device)
-                state.total_songs = total_songs
-            
-            logger.info(f"Starting automation with {len(self.devicelist)} devices and {total_songs} songs")
-            await self.play_circles()  # Циклы до исчерпания лимитов
+            # КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: используем последовательную обработку
+            await self.play_circles_parallel()
             
             return True
+            
         except Exception as e:
             logger.error(f"Error in main: {str(e)}")
-            logger.exception("Full error details:")
             self._save_cache(is_except=True)
             return False
+
+    # ОПЦИОНАЛЬНАЯ ФУНКЦИЯ ДЛЯ BATCH ОБРАБОТКИ (если хотите вернуться к старой логике)
+    async def play_circles_batch(self):
+        """Пакетная обработка - сначала все вводим, потом все включаем"""
+        # Фаза 1: Ввод запросов на всех устройствах
+        logger.info("📝 Фаза 1: Ввод поисковых запросов")
+        search_states = {}
+        
+        for device in self.devicelist:
+            try:
+                result = self.get_name(device)
+                if result:
+                    name_artist = result[0]
+                    d = u2.connect(device)
+                    success = await self.input_search_only(d, name_artist)
+                    if success:
+                        search_states[device] = {
+                            'query': name_artist,
+                            'start_time': time.time()
+                        }
+            except Exception as e:
+                logger.error(f"Ошибка ввода на {device}: {str(e)}")
+        
+        # Фаза 2: Проверка результатов и воспроизведение
+        logger.info("🎵 Фаза 2: Проверка результатов и воспроизведение")
+        await asyncio.sleep(5)  # Даем время на загрузку всех результатов
+        
+        for device, search_info in search_states.items():
+            try:
+                d = u2.connect(device)
+                await self.check_and_play_result(d, device, search_info['query'])
+            except Exception as e:
+                logger.error(f"Ошибка воспроизведения на {device}: {str(e)}")
+
+    async def input_search_only(self, d, name_artist: str) -> bool:
+        """Только ввод поискового запроса без ожидания"""
+        try:
+            search_button = d(resourceId="com.apple.android.music:id/search_src_text")
+            if not search_button.exists:
+                return False
+                
+            search_button.click()
+            time.sleep(1)
+            d.send_keys(name_artist)
+            d.press('enter')
+            logger.info(f"📝 Запрос '{name_artist}' введен")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Ошибка ввода: {str(e)}")
+            return False
+
+    async def check_and_play_result(self, d, device: str, name_artist: str):
+        """Проверка результатов и воспроизведение"""
+        try:
+            # Проверяем результаты
+            results_ready = await self._wait_for_search_results(d, timeout=3)
+            
+            if results_ready:
+                success = await self._play_first_result(d, name_artist)
+                if success:
+                    logger.info(f"✅ {device}: '{name_artist}' включен")
+                else:
+                    self.artists_not_found.append(name_artist)
+            else:
+                logger.warning(f"⚠️ {device}: Результаты для '{name_artist}' не найдены")
+                self.artists_not_found.append(name_artist)
+                
+            await self._clear_search_field(d)
+            
+        except Exception as e:
+            logger.error(f"Ошибка проверки на {device}: {str(e)}")
+
+
+    def get_device_lock(self, device: str):
+        """Получить блокировку для устройства"""
+        if device not in self.device_locks:
+            self.device_locks[device] = asyncio.Lock()
+        return self.device_locks[device]
+
+    async def play_circles_parallel(self):
+        """Истинно параллельная обработка - все устройства работают одновременно"""
+        self.running = True
+        logger.info(f'🎬 Запуск ПАРАЛЛЕЛЬНОЙ обработки устройств')
+        self.split_database(self.config.database_path)
+        
+        timestamp_start = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        logger.info(f"Start {self.config.service_type.capitalize()}: [{timestamp_start}]")
+        
+        # Инициализируем общее количество треков для всех устройств
+        total_songs = sum(1 for line in open(self.config.database_path) if line.strip())
+        for device in self.devicelist:
+            state = self.get_device_state(device)
+            state.total_songs = total_songs
+        
+        # ЗАПУСКАЕМ ВСЕ УСТРОЙСТВА ПАРАЛЛЕЛЬНО
+        tasks = []
+        for device in self.devicelist:
+            task = asyncio.create_task(
+                self.process_device_parallel(device),
+                name=f"device_{device}"
+            )
+            tasks.append(task)
+            logger.info(f"🚀 Запущена задача для устройства {device}")
+        
+        try:
+            # Ждем завершения ВСЕХ устройств
+            logger.info(f"⏳ Ожидание завершения {len(tasks)} параллельных задач...")
+            await asyncio.gather(*tasks, return_exceptions=True)
+            
+        except Exception as e:
+            logger.error(f"Ошибка в параллельной обработке: {str(e)}")
+        finally:
+            # Отменяем все незавершенные задачи
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            
+            # Ждем отмены всех задач
+            await asyncio.gather(*tasks, return_exceptions=True)
+        
+        logger.info("🏁 Параллельная обработка завершена")
+        await self._send_completion_report()
+
+    async def process_device_parallel(self, device: str):
+        """
+        Параллельная обработка одного устройства
+        Каждое устройство работает в своем ритме независимо от других
+        """
+        try:
+            state = self.get_device_state(device)
+            device_lock = self.get_device_lock(device)
+            
+            logger.info(f"🎯 Устройство {device} начинает параллельную работу")
+            
+            last_proxy_check = time.time()
+            proxy_check_interval = 3600  # 1 час
+            processed_tracks = 0
+            
+            while self.running:
+                # Проверяем лимиты глобально
+                if self.check_play_limits_reached():
+                    logger.info(f"🎯 Устройство {device}: Достигнуты глобальные лимиты")
+                    break
+                
+                # Получаем следующий трек (с блокировкой для thread-safety)
+                async with device_lock:
+                    result = self.get_name(device)
+                    if not result:
+                        logger.info(f"📭 Устройство {device}: Нет больше треков")
+                        break
+                    name_artist = result[0]
+                
+                logger.info(f"🎵 Устройство {device}: Обрабатываем '{name_artist}'")
+                
+                # Проверка прокси раз в час
+                current_time = time.time()
+                if current_time - last_proxy_check >= proxy_check_interval:
+                    try:
+                        success = await self.check_and_restart_proxy_if_needed(device)
+                        if not success:
+                            logger.warning(f"⚠️ Устройство {device}: Проблемы с прокси")
+                        last_proxy_check = current_time
+                    except Exception as e:
+                        logger.error(f"Ошибка проверки прокси {device}: {str(e)}")
+                
+                # Обрабатываем трек с повторами
+                track_success = await self.process_track_with_retries(device, name_artist)
+                
+                if track_success:
+                    # Обновляем статистику
+                    async with device_lock:
+                        state.songs_played += 1
+                        processed_tracks += 1
+                    
+                    # Обновляем UI
+                    if self.on_device_progress:
+                        self.on_device_progress(device, state.songs_played, state.total_songs)
+                    
+                    # Периодическое сохранение
+                    if processed_tracks % 5 == 0:  # Чаще сохраняем для параллельной работы
+                        self._periodic_cache_save()
+                    
+                    progress_percent = (state.songs_played / state.total_songs) * 100
+                    logger.info(f"📊 {device}: {state.songs_played}/{state.total_songs} ({progress_percent:.1f}%)")
+                else:
+                    logger.warning(f"⚠️ Устройство {device}: Не удалось обработать '{name_artist}'")
+                
+                # Небольшая пауза между треками для стабильности
+                await asyncio.sleep(30)
+                
+                if not self.running:
+                    break
+            
+            logger.info(f"🏁 Устройство {device} завершило работу ({processed_tracks} треков обработано)")
+            
+        except asyncio.CancelledError:
+            logger.info(f"🛑 Устройство {device} отменено")
+        except Exception as e:
+            logger.error(f"💥 Критическая ошибка устройства {device}: {str(e)}")
+            logger.exception("Full error details:")
+
+    async def process_track_with_retries(self, device: str, name_artist: str) -> bool:
+        """
+        Обработка одного трека с повторами
+        
+        Returns:
+            bool: True если трек успешно обработан
+        """
+        retries = self.config.retry_attempts
+        
+        while retries > 0:
+            try:
+                # Выполняем UI операции в отдельном потоке
+                success = await self.run_ui_operation(device, name_artist)
+                
+                if success:
+                    return True
+                else:
+                    logger.warning(f"⚠️ Устройство {device}: Попытка {self.config.retry_attempts - retries + 1} неудачна")
+                    retries -= 1
+                    if retries > 0:
+                        await asyncio.sleep(2)  # Пауза между попытками
+                        
+            except Exception as e:
+                logger.error(f"❌ Устройство {device}, попытка {self.config.retry_attempts - retries + 1}: {str(e)}")
+                retries -= 1
+                if retries > 0:
+                    await asyncio.sleep(3)
+        
+        logger.error(f"💥 Устройство {device}: Исчерпаны все попытки для '{name_artist}'")
+        return False
+
+    async def run_ui_operation(self, device: str, name_artist: str) -> bool:
+        """
+        Выполнение UI операций в отдельном потоке для неблокирующей работы
+        """
+        loop = asyncio.get_event_loop()
+        
+        def sync_ui_operation():
+            try:
+                # Подключаемся к устройству
+                d = u2.connect(device)
+                
+                # Синхронная версия search_and_play
+                return self.search_and_play_sync(d, name_artist)
+                
+            except Exception as e:
+                logger.error(f"Ошибка UI операции для {device}: {str(e)}")
+                return False
+        
+        # Выполняем в отдельном потоке чтобы не блокировать event loop
+        try:
+            result = await loop.run_in_executor(self.executor, sync_ui_operation)
+            return result
+        except Exception as e:
+            logger.error(f"Ошибка выполнения в executor для {device}: {str(e)}")
+            return False
+
+    def search_and_play_sync(self, d, name_artist: str) -> bool:
+        """
+        Синхронная версия search_and_play для выполнения в отдельном потоке
+        """
+        if not name_artist.strip():
+            logger.warning('Artist Name is empty')
+            return False
+
+        try:
+            d.implicitly_wait(10.0)
+            
+            # Проверяем диалог и всплывающие окна
+            if self._handle_app_not_responding(d):
+                logger.info("Restarting after ANR")
+                if not self.restart_apple(d):
+                    return False
+                    
+            self._handle_popups(d)
+            
+            if not self.is_app_running(d):
+                logger.info("Перезапуск Apple Music...")
+                if not self.restart_apple(d):
+                    return False
+
+            search_button = d(resourceId="com.apple.android.music:id/search_src_text")
+            if not search_button.exists:
+                logger.warning("Search button not found, trying to restart")
+                if not self.restart_apple(d):
+                    return False
+                    
+            self._handle_popups(d)
+                
+            # 1. ВВОД ЗАПРОСА И НАЖАТИЕ ENTER
+            search_button.click()
+            time.sleep(1)
+            d.send_keys(name_artist)
+            time.sleep(1)
+            d.press('enter')            
+            logger.debug(f"Запрос '{name_artist}' введен, Enter нажат")
+            
+            # 2. БЫСТРАЯ ПРОВЕРКА (5 СЕКУНД)
+            quick_result = self._wait_for_search_results_sync(d, timeout=5)
+            
+            if quick_result:
+                # 3А. РЕЗУЛЬТАТЫ ЗАГРУЗИЛИСЬ БЫСТРО - СРАЗУ ВКЛЮЧАЕМ
+                success = self._play_first_result_sync(d, name_artist)
+                self._clear_search_field_sync(d)
+                
+                if success:
+                    logger.debug(f"🎵 Трек '{name_artist}' успешно включен")
+                    return True
+                else:
+                    logger.warning(f"❌ Не удалось включить трек '{name_artist}'")
+                    self.artists_not_found.append(name_artist)
+                    return False
+            
+            # 3Б. РЕЗУЛЬТАТЫ НЕ ЗАГРУЗИЛИСЬ - ЖДЕМ ЕЩЕ 7 СЕКУНД
+            extended_result = self._wait_for_search_results_sync(d, timeout=7)
+            
+            if extended_result:
+                # 4А. ЗАГРУЗИЛИСЬ ПОСЛЕ ДОПОЛНИТЕЛЬНОГО ОЖИДАНИЯ
+                success = self._play_first_result_sync(d, name_artist)
+                self._clear_search_field_sync(d)
+                
+                if success:
+                    logger.debug(f"🎵 Трек '{name_artist}' включен после ожидания")
+                    return True
+                else:
+                    self.artists_not_found.append(name_artist)
+                    return False
+            else:
+                # 4Б. НЕ ЗАГРУЗИЛИСЬ И ПОСЛЕ 12 СЕКУНД ОБЩЕГО ОЖИДАНИЯ
+                logger.warning(f"⚠️ Результаты для '{name_artist}' не загрузились за 12 сек - пропускаем")
+                self.artists_not_found.append(name_artist)
+                self._clear_search_field_sync(d)
+                return False
+
+        except Exception as e:
+            logger.error(f"Ошибка при поиске трека '{name_artist}': {str(e)}")
+            self._clear_search_field_sync(d)
+            return False
+
+    def _wait_for_search_results_sync(self, d, timeout: int) -> bool:
+        """Синхронная версия ожидания результатов"""
+        start_time = time.time()
+        
+        while time.time() - start_time < timeout:
+            try:
+                results_view = d(resourceId="com.apple.android.music:id/search_results_recyclerview")
+                
+                if results_view.exists:
+                    first_result = d.xpath('//*[@resource-id="com.apple.android.music:id/search_results_recyclerview"]/android.view.ViewGroup[1]')
+                    
+                    if first_result.exists:
+                        elapsed = time.time() - start_time
+                        logger.debug(f"🎯 Результаты найдены за {elapsed:.1f} сек")
+                        return True
+                
+                time.sleep(0.5)
+                
+            except Exception as e:
+                logger.error(f"Ошибка при проверке результатов: {str(e)}")
+                break
+        
+        return False
+
+    def _play_first_result_sync(self, d, name_artist: str) -> bool:
+        """Синхронная версия воспроизведения"""
+        try:
+            time.sleep(0.5)
+            
+            first_track = d.xpath('//*[@resource-id="com.apple.android.music:id/search_results_recyclerview"]/android.view.ViewGroup[1]')
+            
+            if first_track.exists:
+                first_track.click()
+                time.sleep(2)
+                self._handle_wrong_navigation(d, name_artist)
+                return True
+            else:
+                logger.warning(f"Первый результат не найден для '{name_artist}'")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Ошибка при включении трека '{name_artist}': {str(e)}")
+            return False
+
+    def _clear_search_field_sync(self, d):
+        """Синхронная версия очистки поиска"""
+        try:
+            self._handle_popups(d)
+            
+            close_button = d(resourceId="com.apple.android.music:id/search_close_btn")
+            if close_button.exists:
+                close_button.click()
+                time.sleep(0.3)
+                
+        except Exception as e:
+            logger.error(f"Ошибка при очистке поиска: {str(e)}")
+
+    async def check_and_restart_proxy_if_needed(self, device: str) -> bool:
+        """Проверка и перезапуск прокси при необходимости"""
+        try:
+            loop = asyncio.get_event_loop()
+            
+            def sync_proxy_check():
+                try:
+                    d = u2.connect(device)
+                    # ИСПРАВЛЕНО: используем синхронную версию проверки прокси
+                    return self.check_proxy_sync(d, device)
+                except Exception as e:
+                    logger.error(f"Ошибка проверки прокси: {str(e)}")
+                    return False
+            
+            # Выполняем проверку прокси в отдельном потоке
+            proxy_ok = await loop.run_in_executor(self.executor, sync_proxy_check)
+            
+            if not proxy_ok:
+                logger.warning(f"Прокси на {device} не работает, перезапускаем")
+                
+                def sync_proxy_restart():
+                    try:
+                        d = u2.connect(device)
+                        # ИСПРАВЛЕНО: используем синхронную версию перезапуска прокси
+                        return self.restart_proxy_full_sync(d, device)
+                    except Exception as e:
+                        logger.error(f"Ошибка перезапуска прокси: {str(e)}")
+                        return False
+                
+                return await loop.run_in_executor(self.executor, sync_proxy_restart)
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Ошибка проверки прокси {device}: {str(e)}")
+            return False
+
+    def check_proxy_sync(self, device, device_addr: str) -> bool:
+        """Синхронная версия проверки прокси"""
+        try:
+            logger.info(f"Checking proxy status for device {device_addr}")
+            
+            # Сохраняем текущее приложение
+            current_app = device.app_current()
+            
+            # Запускаем Surfboard
+            device.app_start('com.getsurfboard')
+            time.sleep(3)  # Даем больше времени на загрузку
+            
+            retry_attempts = 3
+            result = False
+            
+            while retry_attempts > 0:
+                # Проверяем статус VPN
+                if device(description="Stop VPN").exists:
+                    logger.info(f"VPN is active on {device_addr}")
+                    result = True
+                    break
+                elif device(description="Start VPN").exists:
+                    logger.info(f"Starting VPN on {device_addr}")
+                    device(description="Start VPN").click()
+                    time.sleep(3)  # Ждем подключения
+                    
+                    # Проверяем успешность подключения
+                    if device(description="Stop VPN").exists:
+                        logger.info(f"VPN successfully started on {device_addr}")
+                        result = True
+                        break
+                    else:
+                        logger.warning(f"Failed to start VPN, retrying... ({retry_attempts} attempts left)")
+                        retry_attempts -= 1
+                else:
+                    # Если не найдены кнопки Start/Stop VPN
+                    logger.error(f"VPN buttons not found on {device_addr}")
+                    # Пробуем перезапустить приложение
+                    device.app_stop('com.getsurfboard')
+                    time.sleep(1)
+                    device.app_start('com.getsurfboard')
+                    time.sleep(3)
+                    retry_attempts -= 1
+                    
+                if retry_attempts == 0:
+                    logger.error(f"Failed to start VPN after all attempts on {device_addr}")
+            
+            # Возвращаемся к предыдущему приложению
+            if current_app:
+                device.app_start(current_app["package"])
+                time.sleep(2)
+                
+            return result
+                
+        except Exception as e:
+            logger.error(f"Error checking proxy on {device_addr}: {str(e)}")
+            # В случае ошибки пытаемся вернуться к предыдущему приложению
+            if current_app:
+                try:
+                    device.app_start(current_app["package"])
+                except:
+                    pass
+            return False
+
+    def restart_proxy_full_sync(self, device, device_addr: str) -> bool:
+        """Синхронная версия полного перезапуска прокси"""
+        try:
+            logger.info(f"Performing full proxy restart for {device_addr}")
+            
+            # Останавливаем все связанные приложения
+            apps_to_stop = ['com.getsurfboard', 'com.apple.android.music']
+            for app in apps_to_stop:
+                device.app_stop(app)
+                time.sleep(1)
+            
+            # Запускаем Surfboard
+            device.app_start('com.getsurfboard')
+            time.sleep(3)
+            
+            # Пытаемся активировать VPN
+            if not self.check_proxy_sync(device, device_addr):
+                logger.error(f"Failed to activate VPN after full restart on {device_addr}")
+                return False
+                
+            # Запускаем основное приложение
+            device.app_start('com.apple.android.music')
+            time.sleep(3)
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error during full proxy restart on {device_addr}: {str(e)}")
+            return False
+    def cleanup(self):
+        """Очистка ресурсов"""
+        try:
+            if hasattr(self, 'executor'):
+                self.executor.shutdown(wait=True)
+                logger.info("Thread pool executor shut down")
+        except Exception as e:
+            logger.error(f"Error during cleanup: {str(e)}")
 
 def run():
     """Точка входа"""
