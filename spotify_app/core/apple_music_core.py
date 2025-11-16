@@ -1052,101 +1052,110 @@ class AppleMusicAutomation:
             logger.exception("Full error details:")
             return False
     
-    async def check_proxy(self, device: u2.Device, device_addr: str) -> bool:
-        """Проверка состояния прокси и его активация при необходимости"""
-        try:
-            logger.info(f"Checking proxy status for device {device_addr}")
+    # async def check_proxy(self, device: u2.Device, device_addr: str) -> bool:
+    #     """Проверка состояния прокси и его активация при необходимости"""
+    #     try:
+    #         logger.info(f"Checking proxy status for device {device_addr}")
             
-            # Сохраняем текущее приложение
-            current_app = device.app_current()
+    #         # Сохраняем текущее приложение
+    #         current_app = device.app_current()
             
-            # Запускаем Surfboard
-            device.app_start('com.getsurfboard')
-            await asyncio.sleep(3)  # Даем больше времени на загрузку
+    #         # Запускаем Surfboard
+    #         device.app_start('com.getsurfboard')
+    #         await asyncio.sleep(3)  # Даем больше времени на загрузку
             
-            retry_attempts = 3
-            while retry_attempts > 0:
-                # Проверяем статус VPN
-                if device(description="Stop VPN").exists:
-                    logger.info(f"VPN is active on {device_addr}")
-                    result = True
-                    break
-                elif device(description="Start VPN").exists:
-                    logger.info(f"Starting VPN on {device_addr}")
-                    device(description="Start VPN").click()
-                    await asyncio.sleep(3)  # Ждем подключения
+    #         retry_attempts = 3
+    #         while retry_attempts > 0:
+    #             # Проверяем статус VPN
+    #             if device(description="Stop VPN").exists:
+    #                 logger.info(f"VPN is active on {device_addr}")
+    #                 result = True
+    #                 break
+    #             elif device(description="Start VPN").exists:
+    #                 logger.info(f"Starting VPN on {device_addr}")
+    #                 device(description="Start VPN").click()
+    #                 await asyncio.sleep(3)  # Ждем подключения
                     
-                    # Проверяем успешность подключения
-                    if device(description="Stop VPN").exists:
-                        logger.info(f"VPN successfully started on {device_addr}")
-                        result = True
-                        break
-                    else:
-                        logger.warning(f"Failed to start VPN, retrying... ({retry_attempts} attempts left)")
-                        retry_attempts -= 1
-                else:
-                    # Если не найдены кнопки Start/Stop VPN
-                    logger.error(f"VPN buttons not found on {device_addr}")
-                    # Пробуем перезапустить приложение
-                    device.app_stop('com.getsurfboard')
-                    await asyncio.sleep(1)
-                    device.app_start('com.getsurfboard')
-                    await asyncio.sleep(3)
-                    retry_attempts -= 1
+    #                 # Проверяем успешность подключения
+    #                 if device(description="Stop VPN").exists:
+    #                     logger.info(f"VPN successfully started on {device_addr}")
+    #                     result = True
+    #                     break
+    #                 else:
+    #                     logger.warning(f"Failed to start VPN, retrying... ({retry_attempts} attempts left)")
+    #                     retry_attempts -= 1
+    #             else:
+    #                 # Если не найдены кнопки Start/Stop VPN
+    #                 logger.error(f"VPN buttons not found on {device_addr}")
+    #                 # Пробуем перезапустить приложение
+    #                 device.app_stop('com.getsurfboard')
+    #                 await asyncio.sleep(1)
+    #                 device.app_start('com.getsurfboard')
+    #                 await asyncio.sleep(3)
+    #                 retry_attempts -= 1
                     
-                if retry_attempts == 0:
-                    logger.error(f"Failed to start VPN after all attempts on {device_addr}")
-                    result = False
+    #             if retry_attempts == 0:
+    #                 logger.error(f"Failed to start VPN after all attempts on {device_addr}")
+    #                 result = False
             
           
             
-            # Возвращаемся к предыдущему приложению
-            if current_app:
-                device.app_start(current_app["package"])
-                await asyncio.sleep(2)
+    #         # Возвращаемся к предыдущему приложению
+    #         if current_app:
+    #             device.app_start(current_app["package"])
+    #             await asyncio.sleep(2)
                 
-            return result
+    #         return result
                 
-        except Exception as e:
-            logger.error(f"Error checking proxy on {device_addr}: {str(e)}")
-            # В случае ошибки пытаемся вернуться к предыдущему приложению
-            if current_app:
-                try:
-                    device.app_start(current_app["package"])
-                except:
-                    pass
-            return False
-
+    #     except Exception as e:
+    #         logger.error(f"Error checking proxy on {device_addr}: {str(e)}")
+    #         # В случае ошибки пытаемся вернуться к предыдущему приложению
+    #         if current_app:
+    #             try:
+    #                 device.app_start(current_app["package"])
+    #             except:
+    #                 pass
+    #         return False
+    async def check_proxy(self, device: u2.Device, device_addr: str) -> bool:
+        """Заглушка - прокси не проверяется"""
+        logger.debug(f"Proxy check disabled for {device_addr}")
+        return True  # Всегда возвращаем успех
+    
     # Добавим метод для полного перезапуска прокси
-    async def restart_proxy_full(self, device: u2.Device, device_addr: str) -> bool:
-        """Полный перезапуск прокси с очисткой данных"""
-        try:
-            logger.info(f"Performing full proxy restart for {device_addr}")
+    # async def restart_proxy_full(self, device: u2.Device, device_addr: str) -> bool:
+    #     """Полный перезапуск прокси с очисткой данных"""
+    #     try:
+    #         logger.info(f"Performing full proxy restart for {device_addr}")
             
-            # Останавливаем все связанные приложения
-            apps_to_stop = ['com.getsurfboard', 'com.apple.android.music']
-            for app in apps_to_stop:
-                device.app_stop(app)
-                await asyncio.sleep(1)
+    #         # Останавливаем все связанные приложения
+    #         apps_to_stop = ['com.getsurfboard', 'com.apple.android.music']
+    #         for app in apps_to_stop:
+    #             device.app_stop(app)
+    #             await asyncio.sleep(1)
             
-            # Запускаем Surfboard
-            device.app_start('com.getsurfboard')
-            await asyncio.sleep(3)
+    #         # Запускаем Surfboard
+    #         device.app_start('com.getsurfboard')
+    #         await asyncio.sleep(3)
             
-            # Пытаемся активировать VPN
-            if not await self.check_proxy(device, device_addr):
-                logger.error(f"Failed to activate VPN after full restart on {device_addr}")
-                return False
+    #         # Пытаемся активировать VPN
+    #         if not await self.check_proxy(device, device_addr):
+    #             logger.error(f"Failed to activate VPN after full restart on {device_addr}")
+    #             return False
                 
-            # Запускаем основное приложение
-            device.app_start('com.apple.android.music')
-            await asyncio.sleep(3)
+    #         # Запускаем основное приложение
+    #         device.app_start('com.apple.android.music')
+    #         await asyncio.sleep(3)
             
-            return True
+    #         return True
             
-        except Exception as e:
-            logger.error(f"Error during full proxy restart on {device_addr}: {str(e)}")
-            return False
+    #     except Exception as e:
+    #         logger.error(f"Error during full proxy restart on {device_addr}: {str(e)}")
+    #         return False
+
+    async def restart_proxy_full(self, device: u2.Device, device_addr: str) -> bool:
+        """Заглушка - перезапуск прокси отключен"""
+        logger.debug(f"Proxy restart disabled for {device_addr}")
+        return True
 
     def check_play_limits_reached(self) -> bool:
         """Проверка достижения лимитов проигрывания для каждого устройства"""
@@ -1712,99 +1721,112 @@ class AppleMusicAutomation:
             logger.error(f"Ошибка проверки прокси {device}: {str(e)}")
             return False
 
+    # def check_proxy_sync(self, device, device_addr: str) -> bool:
+    #     """Синхронная версия проверки прокси"""
+    #     try:
+    #         logger.info(f"Checking proxy status for device {device_addr}")
+            
+    #         # Сохраняем текущее приложение
+    #         current_app = device.app_current()
+            
+    #         # Запускаем Surfboard
+    #         device.app_start('com.getsurfboard')
+    #         time.sleep(3)  # Даем больше времени на загрузку
+            
+    #         retry_attempts = 3
+    #         result = False
+            
+    #         while retry_attempts > 0:
+    #             # Проверяем статус VPN
+    #             if device(description="Stop VPN").exists:
+    #                 logger.info(f"VPN is active on {device_addr}")
+    #                 result = True
+    #                 break
+    #             elif device(description="Start VPN").exists:
+    #                 logger.info(f"Starting VPN on {device_addr}")
+    #                 device(description="Start VPN").click()
+    #                 time.sleep(3)  # Ждем подключения
+                    
+    #                 # Проверяем успешность подключения
+    #                 if device(description="Stop VPN").exists:
+    #                     logger.info(f"VPN successfully started on {device_addr}")
+    #                     result = True
+    #                     break
+    #                 else:
+    #                     logger.warning(f"Failed to start VPN, retrying... ({retry_attempts} attempts left)")
+    #                     retry_attempts -= 1
+    #             else:
+    #                 # Если не найдены кнопки Start/Stop VPN
+    #                 logger.error(f"VPN buttons not found on {device_addr}")
+    #                 # Пробуем перезапустить приложение
+    #                 device.app_stop('com.getsurfboard')
+    #                 time.sleep(1)
+    #                 device.app_start('com.getsurfboard')
+    #                 time.sleep(3)
+    #                 retry_attempts -= 1
+                    
+    #             if retry_attempts == 0:
+    #                 logger.error(f"Failed to start VPN after all attempts on {device_addr}")
+            
+    #         # Возвращаемся к предыдущему приложению
+    #         if current_app:
+    #             device.app_start(current_app["package"])
+    #             time.sleep(2)
+                
+    #         return result
+                
+    #     except Exception as e:
+    #         logger.error(f"Error checking proxy on {device_addr}: {str(e)}")
+    #         # В случае ошибки пытаемся вернуться к предыдущему приложению
+    #         if current_app:
+    #             try:
+    #                 device.app_start(current_app["package"])
+    #             except:
+    #                 pass
+    #         return False
+
     def check_proxy_sync(self, device, device_addr: str) -> bool:
-        """Синхронная версия проверки прокси"""
-        try:
-            logger.info(f"Checking proxy status for device {device_addr}")
+        """Заглушка - прокси не проверяется (синхронная версия)"""
+        logger.debug(f"Proxy check disabled for {device_addr}")
+        return True
+
+    # def restart_proxy_full_sync(self, device, device_addr: str) -> bool:
+    #     """Синхронная версия полного перезапуска прокси"""
+    #     try:
+    #         logger.info(f"Performing full proxy restart for {device_addr}")
             
-            # Сохраняем текущее приложение
-            current_app = device.app_current()
+    #         # Останавливаем все связанные приложения
+    #         apps_to_stop = ['com.getsurfboard', 'com.apple.android.music']
+    #         for app in apps_to_stop:
+    #             device.app_stop(app)
+    #             time.sleep(1)
             
-            # Запускаем Surfboard
-            device.app_start('com.getsurfboard')
-            time.sleep(3)  # Даем больше времени на загрузку
+    #         # Запускаем Surfboard
+    #         device.app_start('com.getsurfboard')
+    #         time.sleep(3)
             
-            retry_attempts = 3
-            result = False
-            
-            while retry_attempts > 0:
-                # Проверяем статус VPN
-                if device(description="Stop VPN").exists:
-                    logger.info(f"VPN is active on {device_addr}")
-                    result = True
-                    break
-                elif device(description="Start VPN").exists:
-                    logger.info(f"Starting VPN on {device_addr}")
-                    device(description="Start VPN").click()
-                    time.sleep(3)  # Ждем подключения
-                    
-                    # Проверяем успешность подключения
-                    if device(description="Stop VPN").exists:
-                        logger.info(f"VPN successfully started on {device_addr}")
-                        result = True
-                        break
-                    else:
-                        logger.warning(f"Failed to start VPN, retrying... ({retry_attempts} attempts left)")
-                        retry_attempts -= 1
-                else:
-                    # Если не найдены кнопки Start/Stop VPN
-                    logger.error(f"VPN buttons not found on {device_addr}")
-                    # Пробуем перезапустить приложение
-                    device.app_stop('com.getsurfboard')
-                    time.sleep(1)
-                    device.app_start('com.getsurfboard')
-                    time.sleep(3)
-                    retry_attempts -= 1
-                    
-                if retry_attempts == 0:
-                    logger.error(f"Failed to start VPN after all attempts on {device_addr}")
-            
-            # Возвращаемся к предыдущему приложению
-            if current_app:
-                device.app_start(current_app["package"])
-                time.sleep(2)
+    #         # Пытаемся активировать VPN
+    #         if not self.check_proxy_sync(device, device_addr):
+    #             logger.error(f"Failed to activate VPN after full restart on {device_addr}")
+    #             return False
                 
-            return result
-                
-        except Exception as e:
-            logger.error(f"Error checking proxy on {device_addr}: {str(e)}")
-            # В случае ошибки пытаемся вернуться к предыдущему приложению
-            if current_app:
-                try:
-                    device.app_start(current_app["package"])
-                except:
-                    pass
-            return False
+    #         # Запускаем основное приложение
+    #         device.app_start('com.apple.android.music')
+    #         time.sleep(3)
+            
+    #         return True
+            
+    #     except Exception as e:
+    #         logger.error(f"Error during full proxy restart on {device_addr}: {str(e)}")
+    #         return False
+
 
     def restart_proxy_full_sync(self, device, device_addr: str) -> bool:
-        """Синхронная версия полного перезапуска прокси"""
-        try:
-            logger.info(f"Performing full proxy restart for {device_addr}")
-            
-            # Останавливаем все связанные приложения
-            apps_to_stop = ['com.getsurfboard', 'com.apple.android.music']
-            for app in apps_to_stop:
-                device.app_stop(app)
-                time.sleep(1)
-            
-            # Запускаем Surfboard
-            device.app_start('com.getsurfboard')
-            time.sleep(3)
-            
-            # Пытаемся активировать VPN
-            if not self.check_proxy_sync(device, device_addr):
-                logger.error(f"Failed to activate VPN after full restart on {device_addr}")
-                return False
-                
-            # Запускаем основное приложение
-            device.app_start('com.apple.android.music')
-            time.sleep(3)
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error during full proxy restart on {device_addr}: {str(e)}")
-            return False
+        """Заглушка - перезапуск прокси отключен (синхронная версия)"""
+        logger.debug(f"Proxy restart disabled for {device_addr}")
+        return True
+
+
     def cleanup(self):
         """Очистка ресурсов"""
         try:
